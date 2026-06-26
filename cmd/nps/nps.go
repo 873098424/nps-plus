@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/djylb/nps/bridge"
 	"github.com/djylb/nps/lib/common"
@@ -50,6 +52,9 @@ func main() {
 	flag.Parse()
 
 	cmd := parsePrimaryCommand(flag.Args())
+	if cmd != "" {
+		logs.Warn("command %q is ignored in lightweight mode", cmd)
+	}
 	if handleImmediateFlags() {
 		return
 	}
@@ -61,23 +66,12 @@ func main() {
 	logSettings := startup.LogSettings
 	logLevel = logSettings.Level
 	logs.Init(logSettings.Type, logLevel, logSettings.Path, logSettings.MaxSize, logSettings.MaxFiles, logSettings.MaxDays, logSettings.Compress, logSettings.Color)
-	svcConfig := buildNPSServiceConfig(os.Args[1:])
 	prg := &nps{}
-	s, err := service.New(prg, svcConfig)
-	if err != nil {
-		logs.Error("service function disabled %v", err)
-		run()
-		// run without service
-		wg := sync.WaitGroup{}
-		wg.Add(1)
-		wg.Wait()
-		return
-	}
-
-	if handleNPSServiceCommand(cmd, s, svcConfig, prg) {
-		return
-	}
-	_ = s.Run()
+	go waitForShutdownSignals(func() {
+		routers.StopManagedRuntime()
+		prg.signalExit()
+	})
+	_ = prg.run()
 }
 
 func normalizeLegacyLongFlags() {
@@ -172,6 +166,17 @@ func (p *nps) signalExit() {
 	p.exitStop.Do(func() {
 		close(ch)
 	})
+}
+
+func waitForShutdownSignals(stop func()) {
+	if stop == nil {
+		return
+	}
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(ch)
+	<-ch
+	stop()
 }
 
 type npsStartup struct {

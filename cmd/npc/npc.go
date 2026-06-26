@@ -7,14 +7,14 @@ import (
 	goflag "flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
-	"sync"
+	"syscall"
 	"time"
 
 	"github.com/djylb/nps/client"
 	"github.com/djylb/nps/lib/logs"
 	"github.com/djylb/nps/lib/version"
-	"github.com/kardianos/service"
 	flag "github.com/spf13/pflag"
 )
 
@@ -88,27 +88,19 @@ func main() {
 	if handleImmediateFlags() {
 		return
 	}
+	if handleLightweightNPCCommand(cmd) {
+		return
+	}
 	prepareNPCStartup(cmd)
-	svcConfig := buildNPCServiceConfig(os.Args[1:])
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	prg := NewNpc(ctx)
-	s, err := service.New(prg, svcConfig)
-	if err != nil {
-		logs.Error("service function disabled %v", err)
-		run(ctx, cancel)
-		// run without service
-		wg := sync.WaitGroup{}
-		wg.Add(1)
-		wg.Wait()
-		return
-	}
-
-	if handleNPCServiceCommand(ctx, cancel, cmd, s, svcConfig) {
-		return
-	}
-	_ = s.Run()
+	go waitForShutdownSignals(func() {
+		prg.signalExit()
+		cancel()
+	})
+	_ = prg.run()
 }
 
 func normalizeLegacyLongFlags() {
@@ -140,4 +132,52 @@ func normalizeLegacyLongFlags() {
 		out = append(out, a)
 	}
 	os.Args = out
+}
+
+func waitForShutdownSignals(stop func()) {
+	if stop == nil {
+		return
+	}
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(ch)
+	<-ch
+	stop()
+}
+
+func handleLightweightNPCCommand(cmd string) bool {
+	switch cmd {
+	case "":
+		return false
+	case "status":
+		server, vkey, tp, proxy, ip, err := launchCommandArgs()
+		if err != nil {
+			logs.Error("%v", err)
+			os.Exit(1)
+		}
+		statuses, err := client.GetTaskStatus(server, vkey, tp, proxy, ip)
+		if err != nil {
+			logs.Error("%v", err)
+			os.Exit(1)
+		}
+		fmt.Print(client.FormatTaskStatus(statuses))
+		return true
+	case "register":
+		server, vkey, tp, proxy, ip, err := launchCommandArgs()
+		if err != nil {
+			logs.Error("%v", err)
+			os.Exit(1)
+		}
+		if err := client.RegisterLocalIp(server, vkey, tp, proxy, ip, *registerTime); err != nil {
+			logs.Error("%v", err)
+			os.Exit(1)
+		}
+		logs.Info("Successful ip registration for local public network, the validity period is %d hours.", *registerTime)
+		return true
+	case "install", "start", "stop", "restart", "uninstall", "update":
+		logs.Warn("command %q is not available in lightweight mode", cmd)
+		return true
+	default:
+		return false
+	}
 }
