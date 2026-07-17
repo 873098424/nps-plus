@@ -41,9 +41,12 @@ type HttpProxy struct {
 	Magic                 *certmagic.Config
 	Acme                  *certmagic.ACMEIssuer
 	ResponseHeaderTimeout time.Duration
+	UseCache              bool
+	CacheLen              int
+	cacheTransport        *CachingTransport // lazy-init, shared across all hosts
 }
 
-func NewHttpProxy(bridge proxy.NetBridge, task *file.Tunnel, httpPort, httpsPort, http3Port int, httpOnlyPass string, addOrigin, allowLocalProxy bool, httpProxyCache *index.AnyIntIndex) *HttpProxy {
+func NewHttpProxy(bridge proxy.NetBridge, task *file.Tunnel, httpPort, httpsPort, http3Port int, httpOnlyPass string, addOrigin, allowLocalProxy bool, httpProxyCache *index.AnyIntIndex, useCache bool, cacheLen int) *HttpProxy {
 	httpProxy := &HttpProxy{
 		BaseServer:            proxy.NewBaseServer(bridge, task, allowLocalProxy),
 		HttpPort:              httpPort,
@@ -58,6 +61,8 @@ func NewHttpProxy(bridge proxy.NetBridge, task *file.Tunnel, httpPort, httpsPort
 		Http3Bridge:           false,
 		ForceAutoSsl:          false,
 		ResponseHeaderTimeout: 100,
+		UseCache:              useCache,
+		CacheLen:              cacheLen,
 	}
 	return httpProxy
 }
@@ -181,7 +186,18 @@ func (s *HttpProxy) Close() error {
 		_ = s.Http3Server.Close()
 	}
 	s.HttpProxyCache.Clear()
+	if s.cacheTransport != nil {
+		s.cacheTransport.Clear()
+	}
 	return nil
+}
+
+// getCacheTransport returns the shared CachingTransport, lazily initializing it.
+func (s *HttpProxy) getCacheTransport() *CachingTransport {
+	if s.cacheTransport == nil {
+		s.cacheTransport = NewCachingTransport(s.CacheLen)
+	}
+	return s.cacheTransport
 }
 
 // ChangeHostAndHeader Change headers and host of request

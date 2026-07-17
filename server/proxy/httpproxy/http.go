@@ -193,6 +193,15 @@ func (s *HttpServer) handleProxy(w http.ResponseWriter, r *http.Request) {
 		s.HttpProxyCache.Add(host.Id, tr)
 	}
 
+	// Inject per-host parent transport into context so CachingTransport
+	// can use it without a shared mutable field.
+	r = r.WithContext(ContextWithParent(r.Context(), tr))
+
+	var transport http.RoundTripper = tr
+	if s.UseCache {
+		transport = s.getCacheTransport()
+	}
+
 	rp := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			//req = req.WithContext(context.WithValue(req.Context(), "origReq", r))
@@ -208,7 +217,7 @@ func (s *HttpServer) handleProxy(w http.ResponseWriter, r *http.Request) {
 				req.Header["X-Forwarded-For"] = nil
 			}
 		},
-		Transport: tr,
+		Transport: transport,
 		//FlushInterval: 100 * time.Millisecond,
 		BufferPool: common.BufPoolCopy,
 		ModifyResponse: func(resp *http.Response) error {
