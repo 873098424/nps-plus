@@ -170,7 +170,7 @@ func (s *TunnelModeServer) handleConnect(c net.Conn) {
 	addr := net.JoinHostPort(host, strconv.Itoa(int(port)))
 	if s.Task != nil && s.Task.Mode == "mixProxy" && s.Task.DestAclMode != file.AclOff {
 		if !s.Task.AllowsDestination(addr) {
-			logs.Warn("mixProxy dest acl deny: client=%d task=%d dest=%s", s.Task.Client.Id, s.Task.Id, common.ExtractHost(addr))
+			logs.Warn("mixProxy dest acl deny: client=%s task=%s dest=%s", s.Task.Client.Id, s.Task.Id, common.ExtractHost(addr))
 			s.sendReply(c, notAllowed)
 			_ = c.Close()
 			return
@@ -256,7 +256,7 @@ func (s *TunnelModeServer) handleUDP(c net.Conn) {
 	if s.Task != nil && s.Task.Mode == "mixProxy" && s.Task.DestAclMode != file.AclOff {
 		// SOCKS5 UDP frames are tunneled as-is and we do not reliably inspect per-datagram destinations.
 		// Reject UDP associate whenever destination ACL is enabled to avoid bypassing whitelist/blacklist.
-		logs.Warn("mixProxy dest acl active, reject socks5 udp associate: client=%d task=%d", s.Task.Client.Id, s.Task.Id)
+		logs.Warn("mixProxy dest acl active, reject socks5 udp associate: client=%s task=%s", s.Task.Client.Id, s.Task.Id)
 		s.sendReply(c, notAllowed)
 		_ = c.Close()
 		return
@@ -324,7 +324,7 @@ func (s *TunnelModeServer) handleUDP(c net.Conn) {
 
 	target, err := s.Bridge.SendLinkInfo(s.Task.Client.Id, link, s.Task)
 	if err != nil {
-		logs.Warn("get connection from client Id %d error: %v", s.Task.Client.Id, err)
+		logs.Warn("get connection from client Id %s error: %v", s.Task.Client.Id, err)
 		return
 	}
 	defer func() { _ = target.Close() }()
@@ -480,7 +480,7 @@ func ProcessMix(c *conn.Conn, s *TunnelModeServer) error {
 		switch method {
 		case "GE", "PO", "HE", "PU ", "DE", "OP", "CO", "TR", "PA", "PR", "MK", "MO", "LO", "UN", "RE", "AC", "SE", "LI":
 			if !s.Task.HttpProxy {
-				logs.Warn("http proxy is disable, client %d request from: %v", s.Task.Client.Id, c.RemoteAddr())
+				logs.Warn("http proxy is disable, client %s request from: %v", s.Task.Client.Id, c.RemoteAddr())
 				_ = c.Close()
 				return errors.New("http proxy is disabled")
 			}
@@ -499,7 +499,7 @@ func ProcessMix(c *conn.Conn, s *TunnelModeServer) error {
 	}
 
 	if !s.Task.Socks5Proxy {
-		logs.Warn("socks5 proxy is disable, client %d request from: %v", s.Task.Client.Id, c.RemoteAddr())
+		logs.Warn("socks5 proxy is disable, client %s request from: %v", s.Task.Client.Id, c.RemoteAddr())
 		_ = c.Close()
 		return errors.New("socks5 proxy is disabled")
 	}

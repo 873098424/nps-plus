@@ -56,7 +56,7 @@ type Config struct {
 
 type Client struct {
 	Cnf             *Config
-	Id              int        // id
+	Id              string     // id（MongoDB ObjectID hex）
 	VerifyKey       string     // verify key
 	Mode            string     // bridge mode
 	Addr            string     // client ip
@@ -80,15 +80,15 @@ type Client struct {
 	MaxTunnelNum    int
 	Version         string
 	BlackIpList     []string
-	CreateTime      string
-	LastOnlineTime  string
+	CreateTime      int64 // unix 秒；0 = 未记录
+	LastOnlineTime  int64 // unix 秒；0 = 从未上线
 	sync.RWMutex
 }
 
 func NewClient(vKey string, noStore bool, noDisplay bool) *Client {
 	return &Client{
 		Cnf:       new(Config),
-		Id:        0,
+		Id:        "",
 		VerifyKey: vKey,
 		Addr:      "",
 		Remark:    "",
@@ -184,7 +184,7 @@ func (s *Client) EnsureWebPassword() {
 }
 
 type Tunnel struct {
-	Id           int
+	Id           string
 	Port         int
 	ServerIp     string
 	Mode         string
@@ -359,7 +359,7 @@ type Health struct {
 }
 
 type Host struct {
-	Id               int
+	Id               string
 	Host             string // host
 	HeaderChange     string // request header change
 	RespHeaderChange string // response header change

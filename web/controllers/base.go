@@ -46,8 +46,8 @@ func (s *BaseController) Prepare() {
 		s.Data["isAdmin"] = true
 	}
 	if s.GetSession("isAdmin") != nil && !s.GetSession("isAdmin").(bool) {
-		s.Ctx.Input.SetData("client_id", s.GetSession("clientId").(int))
-		s.Ctx.Input.SetParam("client_id", strconv.Itoa(s.GetSession("clientId").(int)))
+		s.Ctx.Input.SetData("client_id", s.GetSession("clientId").(string))
+		s.Ctx.Input.SetParam("client_id", s.GetSession("clientId").(string))
 		s.Data["isAdmin"] = false
 		s.Data["username"] = s.GetSession("username")
 		s.CheckUserAuth()
@@ -184,7 +184,7 @@ func (s *BaseController) AjaxOk(str string) {
 	s.StopRun()
 }
 
-func (s *BaseController) AjaxOkWithId(str string, id int) {
+func (s *BaseController) AjaxOkWithId(str string, id string) {
 	s.Data["json"] = ajaxWithId(str, 1, id)
 	s.ServeJSON()
 	s.StopRun()
@@ -203,7 +203,7 @@ func ajax(str string, status int) map[string]interface{} {
 	return json
 }
 
-func ajaxWithId(str string, status int, id int) map[string]interface{} {
+func ajaxWithId(str string, status int, id string) map[string]interface{} {
 	json := make(map[string]interface{})
 	json["status"] = status
 	json["msg"] = str
@@ -243,25 +243,25 @@ func (s *BaseController) CheckUserAuth() {
 			s.StopRun()
 			return
 		}
-		if id := s.GetIntNoErr("id"); id != 0 {
-			if id != s.GetSession("clientId").(int) {
+		if id := s.getEscapeString("id"); id != "" {
+			if id != s.GetSession("clientId").(string) {
 				s.StopRun()
 				return
 			}
 		}
 	}
 	if s.controllerName == "index" {
-		if id := s.GetIntNoErr("id"); id != 0 {
+		if id := s.getEscapeString("id"); id != "" {
 			belong := false
 			if strings.Contains(s.actionName, "h") {
 				if v, ok := file.GetDb().JsonDb.Hosts.Load(id); ok {
-					if v.(*file.Host).Client.Id == s.GetSession("clientId").(int) {
+					if v.(*file.Host).Client.Id == s.GetSession("clientId").(string) {
 						belong = true
 					}
 				}
 			} else {
 				if v, ok := file.GetDb().JsonDb.Tasks.Load(id); ok {
-					if v.(*file.Tunnel).Client.Id == s.GetSession("clientId").(int) {
+					if v.(*file.Tunnel).Client.Id == s.GetSession("clientId").(string) {
 						belong = true
 					}
 				}

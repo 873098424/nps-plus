@@ -257,7 +257,7 @@ func (s *LoginController) doLogin(username, password, totp string, explicit bool
 				return true
 			}
 			if v.WebUserName == "" && v.WebPassword == "" {
-				if v.Id <= 0 || username != "user" || !allowVkey || v.VerifyKey != password {
+				if username != "user" || !allowVkey || v.VerifyKey != password {
 					return true
 				} else {
 					auth = true
@@ -404,7 +404,7 @@ func (s *LoginController) Register() {
 			}
 		}
 		t := &file.Client{
-			Id:          int(file.GetDb().JsonDb.GetClientId()),
+			Id:          file.NewObjectID(),
 			Status:      true,
 			Cnf:         &file.Config{},
 			WebUserName: s.GetString("username"),

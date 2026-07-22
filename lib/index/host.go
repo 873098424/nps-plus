@@ -8,7 +8,7 @@ import (
 
 type node struct {
 	children map[string]*node
-	ids      map[int]struct{}
+	ids      map[string]struct{}
 }
 
 type DomainTree struct {
@@ -19,23 +19,23 @@ func NewDomainTree() *DomainTree {
 	return &DomainTree{
 		root: &node{
 			children: make(map[string]*node),
-			ids:      make(map[int]struct{}),
+			ids:      make(map[string]struct{}),
 		},
 	}
 }
 
-func (dt *DomainTree) CloneAdd(domain string, id int) *DomainTree {
+func (dt *DomainTree) CloneAdd(domain string, id string) *DomainTree {
 	parts := splitDomain(domain)
 	newRoot := dt.root.cloneAdd(parts, id)
 	return &DomainTree{root: newRoot}
 }
 
-func (n *node) cloneAdd(parts []string, id int) *node {
+func (n *node) cloneAdd(parts []string, id string) *node {
 	newChildren := make(map[string]*node, len(n.children))
 	for k, v := range n.children {
 		newChildren[k] = v
 	}
-	newIDs := make(map[int]struct{}, len(n.ids)+1)
+	newIDs := make(map[string]struct{}, len(n.ids)+1)
 	for iid := range n.ids {
 		newIDs[iid] = struct{}{}
 	}
@@ -50,14 +50,14 @@ func (n *node) cloneAdd(parts []string, id int) *node {
 	if !ok {
 		child = &node{
 			children: make(map[string]*node),
-			ids:      make(map[int]struct{}),
+			ids:      make(map[string]struct{}),
 		}
 	}
 	newChildren[p] = child.cloneAdd(parts[1:], id)
 	return &node{children: newChildren, ids: newIDs}
 }
 
-func (dt *DomainTree) CloneRemove(domain string, id int) *DomainTree {
+func (dt *DomainTree) CloneRemove(domain string, id string) *DomainTree {
 	parts := splitDomain(domain)
 	newRoot, _ := dt.root.cloneRemove(parts, id)
 	if newRoot == nil {
@@ -66,12 +66,12 @@ func (dt *DomainTree) CloneRemove(domain string, id int) *DomainTree {
 	return &DomainTree{root: newRoot}
 }
 
-func (n *node) cloneRemove(parts []string, id int) (*node, bool) {
+func (n *node) cloneRemove(parts []string, id string) (*node, bool) {
 	newChildren := make(map[string]*node, len(n.children))
 	for k, v := range n.children {
 		newChildren[k] = v
 	}
-	newIDs := make(map[int]struct{}, len(n.ids))
+	newIDs := make(map[string]struct{}, len(n.ids))
 	for iid := range n.ids {
 		newIDs[iid] = struct{}{}
 	}
@@ -95,18 +95,18 @@ func (n *node) cloneRemove(parts []string, id int) (*node, bool) {
 	return &node{children: newChildren, ids: newIDs}, false
 }
 
-func (dt *DomainTree) Lookup(domain string) []int {
+func (dt *DomainTree) Lookup(domain string) []string {
 	parts := splitDomain(domain)
-	out := make(map[int]struct{})
+	out := make(map[string]struct{})
 	dt.lookup(dt.root, parts, 0, out)
-	res := make([]int, 0, len(out))
+	res := make([]string, 0, len(out))
 	for id := range out {
 		res = append(res, id)
 	}
 	return res
 }
 
-func (dt *DomainTree) lookup(n *node, parts []string, depth int, out map[int]struct{}) {
+func (dt *DomainTree) lookup(n *node, parts []string, depth int, out map[string]struct{}) {
 	if n == nil {
 		return
 	}
@@ -137,7 +137,7 @@ func splitDomain(domain string) []string {
 	return parts
 }
 
-func (dt *DomainTree) Has(domain string, id int) bool {
+func (dt *DomainTree) Has(domain string, id string) bool {
 	parts := splitDomain(domain)
 	n := dt.root
 	for _, p := range parts {
@@ -171,12 +171,12 @@ func normalizeDomain(domain string) string {
 	return d
 }
 
-func (di *DomainIndex) Lookup(domain string) []int {
+func (di *DomainIndex) Lookup(domain string) []string {
 	d := strings.ToLower(strings.TrimSpace(domain))
 	return di.treeStore.Load().(*DomainTree).Lookup(d)
 }
 
-func (di *DomainIndex) Add(domain string, id int) {
+func (di *DomainIndex) Add(domain string, id string) {
 	d := normalizeDomain(domain)
 	di.mu.Lock()
 	defer di.mu.Unlock()
@@ -190,7 +190,7 @@ func (di *DomainIndex) Add(domain string, id int) {
 	di.treeStore.Store(newTree)
 }
 
-func (di *DomainIndex) Remove(domain string, id int) {
+func (di *DomainIndex) Remove(domain string, id string) {
 	d := normalizeDomain(domain)
 	di.mu.Lock()
 	defer di.mu.Unlock()

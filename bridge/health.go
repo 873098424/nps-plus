@@ -10,8 +10,8 @@ import (
 	"github.com/djylb/nps/lib/logs"
 )
 
-func (s *Bridge) GetHealthFromClient(id int, c *conn.Conn, client *Client, node *Node) {
-	if id <= 0 {
+func (s *Bridge) GetHealthFromClient(id string, c *conn.Conn, client *Client, node *Node) {
+	if id == "" {
 		return
 	}
 
@@ -30,7 +30,7 @@ func (s *Bridge) GetHealthFromClient(id int, c *conn.Conn, client *Client, node 
 			//if !firstSuccess {
 			//	return
 			//}
-			logs.Trace("GetHealthInfo error, id=%d, retry=%d, err=%v", id, retry, err)
+			logs.Trace("GetHealthInfo error, id=%s, retry=%d, err=%v", id, retry, err)
 			break
 		}
 		//logs.Trace("GetHealthInfo: %v, %v, %v", info, err, status)
@@ -105,15 +105,15 @@ func (s *Bridge) ping() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		closedClients := make([]int, 0)
+		closedClients := make([]string, 0)
 		s.Client.Range(func(key, value interface{}) bool {
-			clientID := key.(int)
-			if clientID <= 0 {
+			clientID := key.(string)
+			if clientID == "" {
 				return true
 			}
 			client, ok := value.(*Client)
 			if !ok || client == nil {
-				logs.Trace("Client %d is nil", clientID)
+				logs.Trace("Client %s is nil", clientID)
 				closedClients = append(closedClients, clientID)
 				return true
 			}
@@ -122,7 +122,7 @@ func (s *Bridge) ping() {
 			if node == nil || node.IsOffline() {
 				client.retryTime++
 				if client.retryTime >= 3 {
-					logs.Trace("Stop client %d", clientID)
+					logs.Trace("Stop client %s", clientID)
 					closedClients = append(closedClients, clientID)
 				}
 			} else {
@@ -132,7 +132,7 @@ func (s *Bridge) ping() {
 		})
 
 		for _, clientId := range closedClients {
-			logs.Info("the client %d closed", clientId)
+			logs.Info("the client %s closed", clientId)
 			s.DelClient(clientId)
 		}
 	}

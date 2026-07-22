@@ -68,7 +68,7 @@ func (s *Bridge) CliProcess(c *conn.Conn, tunnelType string) {
 		return
 	}
 	clientVer := string(bytes.TrimRight(vs, "\x00"))
-	var id int
+	var id string
 
 	if ver == 0 {
 		// --- protocol 0.26.0 path ---
@@ -124,12 +124,12 @@ func (s *Bridge) CliProcess(c *conn.Conn, tunnelType string) {
 		}
 		client, err := file.GetDb().GetClient(id)
 		if err != nil {
-			logs.Error("Failed to load client record for ID %d: %v", id, err)
+			logs.Error("Failed to load client record for ID %s: %v", id, err)
 			_ = c.Close()
 			return
 		}
 		if !client.Status {
-			logs.Info("Client %v (ID %d) is disabled", c.Conn.RemoteAddr(), id)
+			logs.Info("Client %v (ID %s) is disabled", c.Conn.RemoteAddr(), id)
 			_ = c.Close()
 			return
 		}
@@ -250,7 +250,7 @@ func (s *Bridge) CliProcess(c *conn.Conn, tunnelType string) {
 	//return
 }
 
-func (s *Bridge) typeDeal(c *conn.Conn, id, ver int, vs, tunnelType string, first bool) {
+func (s *Bridge) typeDeal(c *conn.Conn, id string, ver int, vs, tunnelType string, first bool) {
 	addr := c.RemoteAddr()
 	flag, err := c.ReadFlag()
 	if err != nil {
@@ -317,8 +317,9 @@ func (s *Bridge) typeDeal(c *conn.Conn, id, ver int, vs, tunnelType string, firs
 			}
 		}
 		client.MarkConnectedNow()
+		s.fireClientConnect(id)
 		go s.GetHealthFromClient(id, c, client, node)
-		logs.Info("ClientId %d connection succeeded, address:%v ", id, addr)
+		logs.Info("ClientId %s connection succeeded, address:%v ", id, addr)
 
 	case common.WORK_CHAN:
 		if !first {
@@ -354,10 +355,11 @@ func (s *Bridge) typeDeal(c *conn.Conn, id, ver int, vs, tunnelType string, firs
 			}
 		}
 		client.MarkConnectedNow()
+		s.fireClientConnect(id)
 		if ver > 4 {
 			go func() {
 				defer func() {
-					logs.Trace("Tunnel connection closed, client %d, remote %v", id, addr)
+					logs.Trace("Tunnel connection closed, client %s, remote %v", id, addr)
 					_ = c.Close()
 					_ = node.Close()
 					client.RemoveOfflineNodes(false)
@@ -422,7 +424,7 @@ func (s *Bridge) typeDeal(c *conn.Conn, id, ver int, vs, tunnelType string, firs
 		go func() {
 			idle := NewIdleTimer(30*time.Second, func() { _ = c.Close() })
 			defer func() {
-				logs.Trace("Visitor connection closed, client %d, remote %v", id, addr)
+				logs.Trace("Visitor connection closed, client %s, remote %v", id, addr)
 				idle.Stop()
 				_ = c.Close()
 			}()
@@ -463,7 +465,7 @@ func (s *Bridge) typeDeal(c *conn.Conn, id, ver int, vs, tunnelType string, firs
 		s.SecretChan <- conn.NewSecret(string(b), c)
 
 	case common.WORK_FILE:
-		logs.Warn("clientId %d not support file", id)
+		logs.Warn("clientId %s not support file", id)
 		_ = c.Close()
 		return
 		//muxConn := mux.NewMux(c.Conn, s.tunnelType, s.disconnectTime, false)

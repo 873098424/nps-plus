@@ -28,7 +28,7 @@ func (s *SecretServer) HandleSecret(src net.Conn) error {
 	defer s.Task.CutConn()
 	if err := s.CheckFlowAndConnNum(s.Task.Client); err != nil {
 		_ = src.Close()
-		logs.Warn("Connection limit exceeded, client id %d, host id %d, error %v", s.Task.Client.Id, s.Task.Id, err)
+		logs.Warn("Connection limit exceeded, client id %s, host id %s, error %v", s.Task.Client.Id, s.Task.Id, err)
 		return err
 	}
 	defer s.Task.Client.CutConn()
@@ -72,7 +72,7 @@ func (s *SecretServer) HandleSecret(src net.Conn) error {
 			}
 		}
 	}
-	localProxy = s.AllowLocalProxy && localProxy || s.Task.Client.Id < 0
+	localProxy = s.AllowLocalProxy && localProxy
 	link := conn.NewLink(connType, host, s.Task.Client.Cnf.Crypt, s.Task.Client.Cnf.Compress, c.Conn.RemoteAddr().String(), localProxy)
 	target, err := s.Bridge.SendLinkInfo(s.Task.Client.Id, link, s.Task)
 	if err != nil {

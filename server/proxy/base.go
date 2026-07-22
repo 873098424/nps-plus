@@ -20,7 +20,7 @@ type Service interface {
 }
 
 type NetBridge interface {
-	SendLinkInfo(clientId int, link *conn.Link, t *file.Tunnel) (target net.Conn, err error)
+	SendLinkInfo(clientId string, link *conn.Link, t *file.Tunnel) (target net.Conn, err error)
 	IsServer() bool
 	CliProcess(c *conn.Conn, tunnelType string)
 }
@@ -111,17 +111,17 @@ func (s *BaseServer) DealClient(c *conn.Conn, client *file.Client, addr string,
 	}
 	if task != nil && task.Mode == "mixProxy" && task.DestAclMode != file.AclOff {
 		if !task.AllowsDestination(addr) {
-			logs.Warn("mixProxy dest acl deny: client=%d task=%d dest=%s",
+			logs.Warn("mixProxy dest acl deny: client=%s task=%s dest=%s",
 				client.Id, task.Id, common.ExtractHost(addr))
 			_ = c.Close()
 			return errors.New("destination denied by dest acl")
 		}
 	}
-	isLocal := s.AllowLocalProxy && localProxy || client.Id < 0
+	isLocal := s.AllowLocalProxy && localProxy
 	link := conn.NewLink(tp, addr, client.Cnf.Crypt, client.Cnf.Compress, c.Conn.RemoteAddr().String(), isLocal)
 	target, err := s.Bridge.SendLinkInfo(client.Id, link, s.Task)
 	if err != nil {
-		logs.Warn("get connection from client Id %d  error %v", client.Id, err)
+		logs.Warn("get connection from client Id %s  error %v", client.Id, err)
 		_ = c.Close()
 		return err
 	}

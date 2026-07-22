@@ -97,7 +97,7 @@ func NewP2PManager(pCtx context.Context, pCancel context.CancelFunc, cfg *config
 	return mgr
 }
 
-func (b *P2pBridge) SendLinkInfo(_ int, link *conn.Link, _ *file.Tunnel) (net.Conn, error) {
+func (b *P2pBridge) SendLinkInfo(_ string, link *conn.Link, _ *file.Tunnel) (net.Conn, error) {
 	if link == nil {
 		return nil, errors.New("link is nil")
 	}

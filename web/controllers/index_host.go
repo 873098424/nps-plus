@@ -21,7 +21,7 @@ func (s *IndexController) HostList() {
 		s.display("index/hlist")
 	} else {
 		start, length := s.GetAjaxParams()
-		clientId := s.GetIntNoErr("client_id")
+		clientId := s.getEscapeString("client_id")
 		list, cnt := server.GetHostList(start, length, clientId, s.getEscapeString("search"), s.getEscapeString("sort"), s.getEscapeString("order"))
 		s.AjaxTable(list, cnt, cnt, nil)
 	}
@@ -30,7 +30,7 @@ func (s *IndexController) HostList() {
 func (s *IndexController) GetHost() {
 	if s.Ctx.Request.Method == "POST" {
 		data := make(map[string]interface{})
-		if h, err := file.GetDb().GetHostById(s.GetIntNoErr("id")); err != nil {
+		if h, err := file.GetDb().GetHostById(s.getEscapeString("id")); err != nil {
 			data["code"] = 0
 		} else {
 			data["data"] = h
@@ -42,7 +42,7 @@ func (s *IndexController) GetHost() {
 }
 
 func (s *IndexController) DelHost() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	server.HttpProxyCache.Remove(id)
 	if err := file.GetDb().DelHost(id); err != nil {
 		s.AjaxErr("delete error")
@@ -51,7 +51,7 @@ func (s *IndexController) DelHost() {
 }
 
 func (s *IndexController) StartHost() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	server.HttpProxyCache.Remove(id)
 	mode := s.getEscapeString("mode")
 	if mode != "" {
@@ -71,7 +71,7 @@ func (s *IndexController) StartHost() {
 }
 
 func (s *IndexController) StopHost() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	server.HttpProxyCache.Remove(id)
 	mode := s.getEscapeString("mode")
 	if mode != "" {
@@ -91,7 +91,7 @@ func (s *IndexController) StopHost() {
 }
 
 func (s *IndexController) ClearHost() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	server.HttpProxyCache.Remove(id)
 	mode := s.getEscapeString("mode")
 	if mode != "" {
@@ -110,21 +110,27 @@ func (s *IndexController) AddHost() {
 		s.SetInfo("add host")
 		s.display("index/hadd")
 	} else {
-		id := int(file.GetDb().JsonDb.GetHostId())
+		id := file.NewObjectID()
 		isAdmin := s.GetSession("isAdmin").(bool)
 		allowLocal := beego.AppConfig.DefaultBool("allow_user_local", beego.AppConfig.DefaultBool("allow_local_proxy", false)) || isAdmin
-		clientId := s.GetIntNoErr("client_id")
+		clientId := s.getEscapeString("client_id")
+		client, err := file.GetDb().GetClient(clientId)
+		if err != nil {
+			s.AjaxErr("add error the client can not be found")
+			return
+		}
 		targetStr := strings.ToLower(strings.TrimSpace(strings.ReplaceAll(s.getEscapeString("target"), "\r\n", "\n")))
 		if !isAdmin && strings.Contains(targetStr, "bridge://") {
 			targetStr = ""
 		}
 		h := &file.Host{
-			Id:   id,
-			Host: s.getEscapeString("host"),
+			Id:     id,
+			Client: client,
+			Host:   s.getEscapeString("host"),
 			Target: &file.Target{
 				TargetStr:     targetStr,
 				ProxyProtocol: s.GetIntNoErr("proxy_protocol"),
-				LocalProxy:    (clientId > 0 && s.GetBoolNoErr("local_proxy") && allowLocal) || clientId <= 0,
+				LocalProxy:    s.GetBoolNoErr("local_proxy") && allowLocal,
 			},
 			UserAuth: &file.MultiAccount{
 				Content:    s.getEscapeString("auth"),
@@ -152,10 +158,6 @@ func (s *IndexController) AddHost() {
 			CompatMode:     s.GetBoolNoErr("compat_mode"),
 			TargetIsHttps:  s.GetBoolNoErr("target_is_https"),
 		}
-		var err error
-		if h.Client, err = file.GetDb().GetClient(s.GetIntNoErr("client_id")); err != nil {
-			s.AjaxErr("add error the client can not be found")
-		}
 		if h.Client.MaxTunnelNum != 0 && h.Client.GetTunnelNum() >= h.Client.MaxTunnelNum {
 			s.AjaxErr("The number of tunnels exceeds the limit")
 		}
@@ -168,7 +170,7 @@ func (s *IndexController) AddHost() {
 }
 
 func (s *IndexController) EditHost() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	server.HttpProxyCache.Remove(id)
 	if s.Ctx.Request.Method == "GET" {
 		s.Data["menu"] = "host"
@@ -204,7 +206,7 @@ func (s *IndexController) EditHost() {
 					return
 				}
 			}
-			clientId := s.GetIntNoErr("client_id")
+			clientId := s.getEscapeString("client_id")
 			if client, err := file.GetDb().GetClient(clientId); err != nil {
 				s.AjaxErr("modified error, the client is not exist")
 			} else {
@@ -237,7 +239,7 @@ func (s *IndexController) EditHost() {
 			h.KeyFile = s.getEscapeString("key_file")
 			h.CertFile = s.getEscapeString("cert_file")
 			h.Target.ProxyProtocol = s.GetIntNoErr("proxy_protocol")
-			h.Target.LocalProxy = (clientId > 0 && s.GetBoolNoErr("local_proxy") && allowLocal) || clientId <= 0
+			h.Target.LocalProxy = s.GetBoolNoErr("local_proxy") && allowLocal
 			h.Flow.FlowLimit = int64(s.GetIntNoErr("flow_limit"))
 			h.Flow.TimeLimit = common.GetTimeNoErrByStr(s.getEscapeString("time_limit"))
 			if s.GetBoolNoErr("flow_reset") {
@@ -260,7 +262,7 @@ func (s *IndexController) EditHost() {
 	}
 }
 
-func changeHostStatus(id int, name, action string) (err error) {
+func changeHostStatus(id string, name, action string) (err error) {
 	h, err := file.GetDb().GetHostById(id)
 	if err != nil {
 		return err

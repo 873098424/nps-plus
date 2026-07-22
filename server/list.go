@@ -8,7 +8,7 @@ import (
 	"github.com/djylb/nps/lib/file"
 )
 
-func GetTunnel(start, length int, typeVal string, clientId int, search string, sortField string, order string) ([]*file.Tunnel, int) {
+func GetTunnel(start, length int, typeVal string, clientId string, search string, sortField string, order string) ([]*file.Tunnel, int) {
 	allList := make([]*file.Tunnel, 0) //store all Tunnel
 	list := make([]*file.Tunnel, 0)
 	originLength := length
@@ -20,7 +20,7 @@ func GetTunnel(start, length int, typeVal string, clientId int, search string, s
 	for _, key := range keys {
 		if value, ok := file.GetDb().JsonDb.Tasks.Load(key); ok {
 			v := value.(*file.Tunnel)
-			if (typeVal != "" && v.Mode != typeVal || (clientId != 0 && v.Client.Id != clientId)) || (typeVal == "" && clientId != v.Client.Id) {
+			if (typeVal != "" && v.Mode != typeVal || (clientId != "" && v.Client.Id != clientId)) || (typeVal == "" && clientId != v.Client.Id) {
 				continue
 			}
 			allList = append(allList, v)
@@ -205,7 +205,7 @@ func GetTunnel(start, length int, typeVal string, clientId int, search string, s
 	// search + paging
 	for _, v := range allList {
 		if search != "" &&
-			v.Id != searchInt &&
+			v.Id != search &&
 			v.Port != searchInt &&
 			!common.ContainsFold(v.Password, search) &&
 			!common.ContainsFold(v.Remark, search) &&
@@ -240,7 +240,7 @@ func GetTunnel(start, length int, typeVal string, clientId int, search string, s
 }
 
 // GetHostList get client list
-func GetHostList(start, length, clientId int, search, sortField, order string) (list []*file.Host, cnt int) {
+func GetHostList(start, length int, clientId string, search, sortField, order string) (list []*file.Host, cnt int) {
 	list, cnt = file.GetDb().GetHost(start, length, clientId, search)
 
 	// sort by field, asc or desc
@@ -454,8 +454,8 @@ func GetHostList(start, length, clientId int, search, sortField, order string) (
 	return
 }
 
-// GetClientList get client list
-func GetClientList(start, length int, search, sortField, order string, clientId int) (list []*file.Client, cnt int) {
+// GetClientList get client list (clientId is a MongoDB ObjectID hex string)
+func GetClientList(start, length int, search, sortField, order string, clientId string) (list []*file.Client, cnt int) {
 	list, cnt = file.GetDb().GetClientList(start, length, search, sortField, order, clientId)
 
 	// sort by Id, Remark, Port..., asc or desc

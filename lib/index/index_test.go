@@ -6,20 +6,14 @@ import (
 	"testing"
 )
 
-func sortedInts(values []int) []int {
-	out := append([]int(nil), values...)
-	sort.Ints(out)
-	return out
-}
-
 func TestStringIDIndex_BasicOperations(t *testing.T) {
 	idx := NewStringIDIndex(4)
 
-	idx.Add("alpha", 1)
-	idx.Add("beta", 2)
+	idx.Add("alpha", "1")
+	idx.Add("beta", "2")
 
-	if got, ok := idx.Get("alpha"); !ok || got != 1 {
-		t.Fatalf("Get(alpha) = (%d, %v), want (1, true)", got, ok)
+	if got, ok := idx.Get("alpha"); !ok || got != "1" {
+		t.Fatalf("Get(alpha) = (%s, %v), want (1, true)", got, ok)
 	}
 
 	idx.Remove("alpha")
@@ -79,20 +73,21 @@ func TestAnyIndexes_Clear(t *testing.T) {
 func TestDomainIndex_LookupAndNormalization(t *testing.T) {
 	di := NewDomainIndex()
 
-	di.Add("*.Example.COM", 1)
-	di.Add("api.example.com", 2)
-	di.Add("example.com", 3)
-	di.Add("api.example.com", 2) // duplicate should be ignored
+	di.Add("*.Example.COM", "1")
+	di.Add("api.example.com", "2")
+	di.Add("example.com", "3")
+	di.Add("api.example.com", "2") // duplicate should be ignored
 
-	cases := map[string][]int{
-		"api.example.com":      {1, 2, 3},
-		"deep.api.example.com": {1, 2, 3},
-		"example.com":          {1, 3},
+	cases := map[string][]string{
+		"api.example.com":      {"1", "2", "3"},
+		"deep.api.example.com": {"1", "2", "3"},
+		"example.com":          {"1", "3"},
 		"other.com":            nil,
 	}
 
 	for domain, want := range cases {
-		got := sortedInts(di.Lookup(domain))
+		got := di.Lookup(domain)
+		sort.Strings(got)
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("Lookup(%q) = %v, want %v", domain, got, want)
 		}
@@ -101,16 +96,16 @@ func TestDomainIndex_LookupAndNormalization(t *testing.T) {
 
 func TestDomainIndex_RemoveAndDestroy(t *testing.T) {
 	di := NewDomainIndex()
-	di.Add("example.com", 1)
-	di.Add("api.example.com", 2)
+	di.Add("example.com", "1")
+	di.Add("api.example.com", "2")
 
-	di.Remove("api.example.com", 2)
-	if got := sortedInts(di.Lookup("api.example.com")); !reflect.DeepEqual(got, []int{1}) {
+	di.Remove("api.example.com", "2")
+	if got := di.Lookup("api.example.com"); !reflect.DeepEqual(got, []string{"1"}) {
 		t.Fatalf("after remove Lookup(api.example.com) = %v, want [1]", got)
 	}
 
-	di.Remove("api.example.com", 2) // removing missing pair is no-op
-	if got := sortedInts(di.Lookup("api.example.com")); !reflect.DeepEqual(got, []int{1}) {
+	di.Remove("api.example.com", "2") // removing missing pair is no-op
+	if got := di.Lookup("api.example.com"); !reflect.DeepEqual(got, []string{"1"}) {
 		t.Fatalf("after duplicate remove Lookup(api.example.com) = %v, want [1]", got)
 	}
 

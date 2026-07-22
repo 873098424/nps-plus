@@ -196,7 +196,7 @@ func checkHTTPAndRedirect(c net.Conn, rb []byte) {
 
 func (s *HttpsServer) handleHttpsProxy(host *file.Host, c net.Conn, rb []byte, sni string) {
 	if err := s.CheckFlowAndConnNum(host.Client); err != nil {
-		logs.Debug("Client id %d, host id %d, error %v during https connection", host.Client.Id, host.Id, err)
+		logs.Debug("Client id %s, host id %s, error %v during https connection", host.Client.Id, host.Id, err)
 		_ = c.Close()
 		return
 	}
@@ -210,14 +210,14 @@ func (s *HttpsServer) handleHttpsProxy(host *file.Host, c net.Conn, rb []byte, s
 		_ = c.Close()
 		return
 	}
-	logs.Info("New HTTPS connection, clientId %d, host %s, remote address %v", host.Client.Id, sni, c.RemoteAddr())
+	logs.Info("New HTTPS connection, clientId %s, host %s, remote address %v", host.Client.Id, sni, c.RemoteAddr())
 	task := file.NewTunnelByHost(host, s.HttpsPort)
 	_ = s.DealClient(conn.NewConn(c), host.Client, targetAddr, rb, common.CONN_TCP, nil, []*file.Flow{host.Flow, host.Client.Flow}, host.Target.ProxyProtocol, host.Target.LocalProxy, task)
 }
 
 func (s *HttpsServer) handleTlsProxy(host *file.Host, tlsConn net.Conn, sni string) {
 	if err := s.CheckFlowAndConnNum(host.Client); err != nil {
-		logs.Debug("Client id %d, host id %d, TLS-only check failed: %v", host.Client.Id, host.Id, err)
+		logs.Debug("Client id %s, host id %s, TLS-only check failed: %v", host.Client.Id, host.Id, err)
 		_ = tlsConn.Close()
 		return
 	}
@@ -231,7 +231,7 @@ func (s *HttpsServer) handleTlsProxy(host *file.Host, tlsConn net.Conn, sni stri
 		_ = tlsConn.Close()
 		return
 	}
-	logs.Info("New TLS offload connection, clientId %d, host %s, remote %v -> %s", host.Client.Id, sni, tlsConn.RemoteAddr(), targetAddr)
+	logs.Info("New TLS offload connection, clientId %s, host %s, remote %v -> %s", host.Client.Id, sni, tlsConn.RemoteAddr(), targetAddr)
 	task := file.NewTunnelByHost(host, s.HttpsPort)
 	_ = s.DealClient(conn.NewConn(tlsConn), host.Client, targetAddr, nil, common.CONN_TCP, nil, []*file.Flow{host.Flow, host.Client.Flow}, host.Target.ProxyProtocol, host.Target.LocalProxy, task)
 }

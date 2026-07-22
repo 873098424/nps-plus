@@ -198,7 +198,7 @@ func (n *Node) IsOnline() bool {
 }
 
 func (n *Node) isOnline() bool {
-	return !n.isTunnelClosed() && (n.signal != nil && !n.signal.IsClosed()) || n.Client.Id < 0
+	return !n.isTunnelClosed() && (n.signal != nil && !n.signal.IsClosed())
 }
 
 func (n *Node) IsTunnelClosed() bool {
@@ -225,7 +225,7 @@ func (n *Node) IsOffline() bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	if n.BaseVer < 5 {
-		return n.isTunnelClosed() && (n.signal == nil || n.signal.IsClosed()) && n.Client.Id > 0
+		return n.isTunnelClosed() && (n.signal == nil || n.signal.IsClosed())
 	}
 	return !n.isOnline()
 }
@@ -268,7 +268,7 @@ func (n *Node) closeTunnel(err string) error {
 
 type Client struct {
 	mu              sync.RWMutex
-	Id              int
+	Id              string
 	LastUUID        string
 	nodeList        *pool.Pool[string] // nodeUUID
 	nodes           sync.Map           // map[nodeUUID]*Node
@@ -278,7 +278,7 @@ type Client struct {
 	lastConnectNano int64
 }
 
-func NewClient(id int, n *Node) *Client {
+func NewClient(id string, n *Node) *Client {
 	c := &Client{
 		Id:       id,
 		LastUUID: n.UUID,
@@ -382,7 +382,7 @@ func (c *Client) CheckNode() *Node {
 	size := c.nodeList.Size()
 	c.mu.RUnlock()
 	if size == 0 {
-		logs.Warn("Client %d has no nodes to switch to", c.Id)
+		logs.Warn("Client %s has no nodes to switch to", c.Id)
 		return nil
 	}
 	first := true
@@ -403,7 +403,7 @@ func (c *Client) CheckNode() *Node {
 				nextUUID, _ = c.nodeList.Next()
 			}
 			if nextUUID == "" {
-				logs.Warn("Client %d has no nodes to switch to", c.Id)
+				logs.Warn("Client %s has no nodes to switch to", c.Id)
 				return nil
 			}
 			c.mu.Lock()
@@ -419,7 +419,7 @@ func (c *Client) CheckNode() *Node {
 			if ok {
 				if !node.IsOffline() {
 					if !first {
-						logs.Info("Client %d switched to backup node %s", c.Id, lastUUID)
+						logs.Info("Client %s switched to backup node %s", c.Id, lastUUID)
 					}
 					return node
 				}
@@ -442,7 +442,7 @@ func (c *Client) CheckNode() *Node {
 		removed := c.LastUUID
 		c.removeNode(removed)
 		c.mu.Unlock()
-		logs.Info("Client %d removed node %s", c.Id, removed)
+		logs.Info("Client %s removed node %s", c.Id, removed)
 	}
 }
 
@@ -530,12 +530,12 @@ func (c *Client) removeOfflineNodes(keepUUID string, force bool, ignoreClientGra
 		if v, ok := c.nodes.Load(it.uuid); ok && v == it.node && !it.node.IsOnline() {
 			c.removeNode(it.uuid)
 			removed++
-			logs.Info("Client %d removed offline node %s", c.Id, it.uuid)
+			logs.Info("Client %s removed offline node %s", c.Id, it.uuid)
 		}
 	}
 	c.mu.Unlock()
 	if removed > 0 {
-		logs.Info("Client %d pruned %d offline node(s)", c.Id, removed)
+		logs.Info("Client %s pruned %d offline node(s)", c.Id, removed)
 	}
 	return removed
 }

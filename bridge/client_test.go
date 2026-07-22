@@ -36,7 +36,7 @@ func TestSetClientSelectMode(t *testing.T) {
 
 func TestClientGetNodeByFileRespectsGraceThenPrunesOfflineNode(t *testing.T) {
 	node := NewNode("n1", "", 6)
-	client := NewClient(1, node)
+	client := NewClient("1", node)
 
 	if err := client.AddFile("file-key", "n1"); err != nil {
 		t.Fatalf("AddFile returned error: %v", err)
@@ -60,7 +60,7 @@ func TestClientGetNodeByFileRespectsGraceThenPrunesOfflineNode(t *testing.T) {
 
 func TestClientGetNodeByFileReturnsOnlineNodeWithoutExternalDependency(t *testing.T) {
 	node := NewNode("n2", "", 6)
-	client := NewClient(-1, node)
+	client := NewClient("-1", node)
 
 	if err := client.AddFile("f2", "n2"); err != nil {
 		t.Fatalf("AddFile returned error: %v", err)
@@ -73,7 +73,7 @@ func TestClientGetNodeByFileReturnsOnlineNodeWithoutExternalDependency(t *testin
 
 func TestRemoveOfflineNodesRetriesBeforeRemoval(t *testing.T) {
 	node := NewNode("n3", "", 6)
-	client := NewClient(2, node)
+	client := NewClient("2", node)
 	atomic.StoreInt64(&client.lastConnectNano, time.Now().Add(-10*time.Second).UnixNano())
 	node.joinNano = time.Now().Add(-10 * time.Second).UnixNano()
 

@@ -15,11 +15,10 @@ import (
 	"github.com/djylb/nps/lib/file"
 	"github.com/djylb/nps/lib/index"
 	"github.com/djylb/nps/lib/logs"
-	"github.com/djylb/nps/lib/rate"
-	"github.com/djylb/nps/lib/version"
 	"github.com/djylb/nps/server/connection"
 	"github.com/djylb/nps/server/proxy"
 	"github.com/djylb/nps/server/proxy/httpproxy"
+	"github.com/djylb/nps/server/relay"
 	"github.com/djylb/nps/server/tool"
 )
 
@@ -27,14 +26,14 @@ var (
 	Bridge         *bridge.Bridge
 	RunList        sync.Map //map[int]interface{}
 	once           sync.Once
-	HttpProxyCache = index.NewAnyIntIndex()
+	HttpProxyCache = index.NewAnyStringIndex()
 )
 
 const pingTimeout = 15 * time.Second
 
 func init() {
 	RunList = sync.Map{}
-	tool.SetLookup(func(id int) (tool.Dialer, bool) {
+	tool.SetLookup(func(id string) (tool.Dialer, bool) {
 		if v, ok := RunList.Load(id); ok {
 			if svr, ok := v.(*proxy.TunnelModeServer); ok {
 				if !strings.Contains(svr.Task.Target.TargetStr, "tunnel://") {
@@ -48,27 +47,6 @@ func init() {
 
 // InitFromDb init task from db
 func InitFromDb() {
-	if allowLocalProxy, _ := beego.AppConfig.Bool("allow_local_proxy"); allowLocalProxy {
-		db := file.GetDb()
-		if _, err := db.GetClient(-1); err != nil {
-			local := new(file.Client)
-			local.Id = -1
-			local.Remark = "Local Proxy"
-			local.Addr = "127.0.0.1"
-			local.Cnf = new(file.Config)
-			local.Flow = new(file.Flow)
-			local.Rate = rate.NewRate(0)
-			local.Rate.Start()
-			local.NowConn = 0
-			local.Status = true
-			local.ConfigConnAllow = true
-			local.Version = version.VERSION
-			local.VerifyKey = "localproxy"
-			db.JsonDb.Clients.Store(local.Id, local)
-			logs.Info("Auto create local proxy client.")
-		}
-	}
-
 	//Add a public password
 	if vkey := beego.AppConfig.String("public_vkey"); vkey != "" {
 		c := file.NewClient(vkey, true, true)
@@ -98,7 +76,7 @@ func DealBridgeTask() {
 				//_ = AddTask(t)
 				_ = StopServer(t.Id)
 				if err := StartTask(t.Id); err != nil {
-					logs.Error("StartTask(%d) error: %v", t.Id, err)
+					logs.Error("StartTask(%s) error: %v", t.Id, err)
 				}
 			}
 		case t := <-Bridge.CloseTask:
@@ -147,6 +125,9 @@ func StartNewServer(cnf *file.Tunnel, bridgeDisconnect int) {
 			os.Exit(1)
 		}
 	}()
+
+	// Cross-node relay setup (Phase 1: static routes).
+	initRelay(bridgeDisconnect)
 	if p, err := beego.AppConfig.Int("p2p_port"); err == nil {
 		for i := 0; i < 3; i++ {
 			port := p + i
@@ -180,8 +161,98 @@ func dealClientFlow() {
 	}
 }
 
-func PingClient(id int, addr string) int {
-	if id <= 0 {
+// initRelay wires the cross-node relay. NPS1 (entry) uses relay_routes to
+// forward traffic to the nps that owns the client; NPS2 (owner) listens on
+// relay_port to receive it. Both can be enabled independently.
+//
+// 当启用 MongoDB 共享存储时，还会开启"动态路由"：owner 节点自动把在线 client 位置
+// 上报到注册表，entry 节点查表自动转发，无需手写 relay_routes。
+func initRelay(bridgeDisconnect int) {
+	key := beego.AppConfig.String("relay_key")
+	advertise := strings.TrimSpace(beego.AppConfig.String("relay_advertise"))
+	// 用“是否已配置 mongodb_uri”判断动态路由意图，而非依赖 GetDb() 之后的 mongoOn 标志，
+	// 避免 initRelay 在 GetDb() 置位 mongoOn 之前执行时把动态路由静默关闭。
+	dynamic := file.MongoConfigured()
+	if dynamic {
+		file.GetDb() // 确保 Mongo 连接已建立、mongoOn=true，presence 写入/查表才不会静默失效
+	}
+
+	routes, err := relay.ParseRoutes(beego.AppConfig.String("relay_routes"))
+	if err != nil {
+		logs.Error("relay: parse relay_routes error: %v", err)
+		routes = nil
+	}
+
+	// 入口路由：有静态路由或启用了动态路由都需要 router
+	if key == "" {
+		if len(routes) > 0 {
+			logs.Error("relay: relay_routes set but relay_key is empty; relay client disabled")
+		}
+	} else if len(routes) > 0 || dynamic {
+		router := relay.NewRelayRouter(bridgeDisconnect, key, routes)
+		if dynamic {
+			router.SetSelfAddr(advertise)
+			router.SetResolver(file.LookupPresence)
+			logs.Info("relay: dynamic routing enabled via shared presence registry")
+		}
+		Bridge.SetRelay(router.Route)
+		logs.Info("relay: client router enabled (%d static route(s), dynamic=%v)", len(routes), dynamic)
+	}
+
+	// owner 端：监听 relay_port 接收其他节点转发过来的流量
+	if port, err := beego.AppConfig.Int("relay_port"); err == nil && port > 0 {
+		if key == "" {
+			logs.Error("relay: relay_port set but relay_key is empty; relay server disabled")
+		} else {
+			bind := fmt.Sprintf("%s:%d", beego.AppConfig.String("bridge_ip"), port)
+			allow := relay.ParseAllowIps(beego.AppConfig.String("relay_allow_ips"))
+			rs := relay.NewRelayServer(bind, key, allow, Bridge, bridgeDisconnect)
+			if err := rs.Start(); err != nil {
+				logs.Error("relay: server start error: %v", err)
+			} else if dynamic {
+				// 自动上报在线位置：优先用 relay_advertise，否则用出站 IP:relay_port 兜底
+				adv := advertise
+				if adv == "" {
+					adv = fmt.Sprintf("%s:%d", common.GetOutboundIP().String(), port)
+					logs.Warn("relay: relay_advertise not set, auto using %s (recommend setting it explicitly)", adv)
+				}
+				// 事件驱动：client 连接/断开瞬间即写入注册表（毫秒级生效，无残留窗口）。
+				// 另起低频心跳作为兜底，应对节点被强杀/网络分区等"优雅断开未触发"的场景。
+				Bridge.SetClientLifecycleHooks(
+					func(id string) { file.OnClientOnline(id, adv) },
+					func(id string) { file.OnClientOffline(id) },
+				)
+				go presenceHeartbeatLoop(adv)
+				logs.Info("relay: presence registry active (event-driven + heartbeat), advertising %s", adv)
+			}
+		}
+	}
+}
+
+// presenceHeartbeatLoop 低频刷新本节点在线 client 的 ts，作为"优雅断开钩子没触发"时的兜底。
+// 真正的位置写入发生在 client 连接/断开的瞬间（见 bridge 生命周期钩子），这里只负责续命。
+func presenceHeartbeatLoop(advertise string) {
+	heartbeatOnce(advertise)
+	ticker := time.NewTicker(file.PresenceBeatInterval())
+	defer ticker.Stop()
+	for range ticker.C {
+		heartbeatOnce(advertise)
+	}
+}
+
+func heartbeatOnce(advertise string) {
+	ids := make([]string, 0, 16)
+	Bridge.Client.Range(func(k, _ interface{}) bool {
+		if id, ok := k.(string); ok && id != "" {
+			ids = append(ids, id)
+		}
+		return true
+	})
+	file.PresenceHeartbeat(advertise, ids)
+}
+
+func PingClient(id string, addr string) int {
+	if id == "" {
 		return 0
 	}
 	link := conn.NewLink("ping", "", false, false, addr, false)
@@ -190,7 +261,7 @@ func PingClient(id int, addr string) int {
 	start := time.Now()
 	target, err := Bridge.SendLinkInfo(id, link, nil)
 	if err != nil {
-		logs.Warn("get connection from client Id %d error %v", id, err)
+		logs.Warn("get connection from client Id %s error %v", id, err)
 		return -1
 	}
 	rtt := int(time.Since(start).Milliseconds())
@@ -236,12 +307,12 @@ func NewMode(Bridge *bridge.Bridge, c *file.Tunnel) proxy.Service {
 }
 
 // StopServer stop server
-func StopServer(id int) error {
+func StopServer(id string) error {
 	if t, err := file.GetDb().GetTask(id); err != nil {
 		return err
 	} else {
 		t.Status = false
-		logs.Info("close port %d,remark %s,client id %d,task id %d", t.Port, t.Remark, t.Client.Id, t.Id)
+		logs.Info("close port %d,remark %s,client id %s,task id %s", t.Port, t.Remark, t.Client.Id, t.Id)
 		_ = file.GetDb().UpdateTask(t)
 	}
 	//if v, ok := RunList[id]; ok {
@@ -250,9 +321,9 @@ func StopServer(id int) error {
 			if err := svr.Close(); err != nil {
 				return err
 			}
-			logs.Info("stop server id %d", id)
+			logs.Info("stop server id %s", id)
 		} else {
-			logs.Warn("stop server id %d error", id)
+			logs.Warn("stop server id %s error", id)
 		}
 		//delete(RunList, id)
 		RunList.Delete(id)
@@ -270,7 +341,7 @@ func AddTask(t *file.Tunnel) error {
 		return nil
 	}
 	if b := tool.TestServerPort(t.Port, t.Mode); !b && t.Mode != "httpHostServer" {
-		logs.Error("taskId %d start error port %d open failed", t.Id, t.Port)
+		logs.Error("taskId %s start error port %d open failed", t.Id, t.Port)
 		return errors.New("the port open error")
 	}
 	if minute, err := beego.AppConfig.Int("flow_store_interval"); err == nil && minute > 0 {
@@ -282,7 +353,7 @@ func AddTask(t *file.Tunnel) error {
 		RunList.Store(t.Id, svr)
 		go func() {
 			if err := svr.Start(); err != nil {
-				logs.Error("clientId %d taskId %d start error %v", t.Client.Id, t.Id, err)
+				logs.Error("clientId %s taskId %s start error %v", t.Client.Id, t.Id, err)
 				//delete(RunList, t.Id)
 				RunList.Delete(t.Id)
 				return
@@ -295,7 +366,7 @@ func AddTask(t *file.Tunnel) error {
 }
 
 // StartTask start task
-func StartTask(id int) error {
+func StartTask(id string) error {
 	if t, err := file.GetDb().GetTask(id); err != nil {
 		return err
 	} else {
@@ -313,7 +384,7 @@ func StartTask(id int) error {
 }
 
 // DelTask delete task
-func DelTask(id int) error {
+func DelTask(id string) error {
 	//if _, ok := RunList[id]; ok {
 	if _, ok := RunList.Load(id); ok {
 		if err := StopServer(id); err != nil {
@@ -324,8 +395,8 @@ func DelTask(id int) error {
 }
 
 // DelTunnelAndHostByClientId delete all host and tasks by client id
-func DelTunnelAndHostByClientId(clientId int, justDelNoStore bool) {
-	var ids []int
+func DelTunnelAndHostByClientId(clientId string, justDelNoStore bool) {
+	var ids []string
 	file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
 		v := value.(*file.Tunnel)
 		if justDelNoStore && !v.NoStore {
@@ -357,7 +428,7 @@ func DelTunnelAndHostByClientId(clientId int, justDelNoStore bool) {
 }
 
 // DelClientConnect close the client
-func DelClientConnect(clientId int) {
+func DelClientConnect(clientId string) {
 	Bridge.DelClient(clientId)
 }
 
@@ -367,7 +438,7 @@ func dealClientData() {
 		v := value.(*file.Client)
 		if vv, ok := Bridge.Client.Load(v.Id); ok {
 			v.IsConnect = true
-			v.LastOnlineTime = time.Now().Format("2006-01-02 15:04:05")
+			v.LastOnlineTime = time.Now().Unix()
 			cli := vv.(*bridge.Client)
 			node, ok := cli.GetNodeByUUID(cli.LastUUID)
 			var ver string
@@ -379,20 +450,6 @@ func dealClientData() {
 				ver = fmt.Sprintf("%s(%d)", ver, cli.NodeCount())
 			}
 			v.Version = ver
-		} else if v.Id <= 0 {
-			if allowLocalProxy, _ := beego.AppConfig.Bool("allow_local_proxy"); allowLocalProxy {
-				v.IsConnect = v.Status
-				v.Version = version.VERSION
-				v.Mode = "local"
-				v.LocalAddr = common.GetOutboundIP().String()
-				// Add Local Client
-				if _, exists := Bridge.Client.Load(v.Id); !exists && v.Status {
-					Bridge.Client.Store(v.Id, bridge.NewClient(v.Id, bridge.NewNode("127.0.0.1", version.VERSION, version.GetLatestIndex())))
-					logs.Debug("Inserted virtual client for ID %d", v.Id)
-				}
-			} else {
-				v.IsConnect = false
-			}
 		} else {
 			v.IsConnect = false
 		}
@@ -424,20 +481,27 @@ func dealClientData() {
 }
 
 func flowSession(m time.Duration) {
-	file.GetDb().JsonDb.StoreHostToJsonFile()
-	file.GetDb().JsonDb.StoreTasksToJsonFile()
-	file.GetDb().JsonDb.StoreClientsToJsonFile()
-	file.GetDb().JsonDb.StoreGlobalToJsonFile()
+	persistAll()
 	once.Do(func() {
 		go func() {
 			ticker := time.NewTicker(m)
 			defer ticker.Stop()
 			for range ticker.C {
-				file.GetDb().JsonDb.StoreHostToJsonFile()
-				file.GetDb().JsonDb.StoreTasksToJsonFile()
-				file.GetDb().JsonDb.StoreClientsToJsonFile()
-				file.GetDb().JsonDb.StoreGlobalToJsonFile()
+				persistAll()
 			}
 		}()
 	})
+}
+
+// persistAll 落盘：MongoDB 模式下只刷新"本节点持有连接"的实体流量，避免跨节点覆盖；
+// 否则沿用原 JSON 文件整体写盘。
+func persistAll() {
+	if file.MongoEnabled() {
+		file.GetDb().JsonDb.FlushFlowToMongo()
+		return
+	}
+	file.GetDb().JsonDb.StoreHostToJsonFile()
+	file.GetDb().JsonDb.StoreTasksToJsonFile()
+	file.GetDb().JsonDb.StoreClientsToJsonFile()
+	file.GetDb().JsonDb.StoreGlobalToJsonFile()
 }

@@ -135,7 +135,7 @@ func (s *HttpServer) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Check flow and conn
 	if err := s.CheckFlowAndConnNum(host.Client); err != nil {
 		http.Error(w, "Access denied: "+err.Error(), http.StatusTooManyRequests)
-		logs.Warn("Connection limit exceeded, client id %d, host id %d, error %v", host.Client.Id, host.Id, err)
+		logs.Warn("Connection limit exceeded, client id %s, host id %s, error %v", host.Client.Id, host.Id, err)
 		return
 	}
 	defer host.Client.CutConn()
@@ -277,7 +277,7 @@ func (s *HttpServer) handleWebsocket(w http.ResponseWriter, r *http.Request, hos
 	}
 
 	logs.Info("%s websocket request, method %s, host %s, url %s, remote address %s, target %s", r.URL.Scheme, r.Method, r.Host, r.URL.Path, r.RemoteAddr, targetAddr)
-	isLocal := s.AllowLocalProxy && host.Target.LocalProxy || host.Client.Id < 0
+	isLocal := s.AllowLocalProxy && host.Target.LocalProxy
 	link := conn.NewLink("tcp", targetAddr, host.Client.Cnf.Crypt, host.Client.Cnf.Compress, r.RemoteAddr, isLocal)
 	targetConn, err := s.Bridge.SendLinkInfo(host.Client.Id, link, nil)
 	if err != nil {
@@ -423,14 +423,14 @@ func (s *HttpServer) DialContext(ctx context.Context, network, addr string) (net
 	h := ctx.Value(ctxHost).(*file.Host)
 	targetAddr, err := h.Target.GetRandomTarget()
 	if err != nil {
-		logs.Warn("No backend found for h: %d Err: %v", h.Id, err)
+		logs.Warn("No backend found for h: %s Err: %v", h.Id, err)
 		return nil, err
 	}
-	isLocal := s.AllowLocalProxy && h.Target.LocalProxy || h.Client.Id < 0
+	isLocal := s.AllowLocalProxy && h.Target.LocalProxy
 	link := conn.NewLink("tcp", targetAddr, h.Client.Cnf.Crypt, h.Client.Cnf.Compress, remote, isLocal)
 	target, err := s.Bridge.SendLinkInfo(h.Client.Id, link, nil)
 	if err != nil {
-		logs.Info("DialContext: connection to host %d (target %s) failed: %v", h.Id, targetAddr, err)
+		logs.Info("DialContext: connection to host %s (target %s) failed: %v", h.Id, targetAddr, err)
 		return nil, err
 	}
 	rawConn := conn.GetConn(target, link.Crypt, link.Compress, h.Client.Rate, true, isLocal)

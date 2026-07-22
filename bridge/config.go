@@ -75,6 +75,7 @@ loop:
 			_ = c.WriteAddOk()
 			_, _ = c.Write([]byte(client.VerifyKey))
 			s.Client.Store(client.Id, NewClient(client.Id, NewNode(uuid, vs, ver)))
+			s.fireClientConnect(client.Id)
 
 		case common.NEW_HOST:
 			h, err := c.GetHostInfo()
@@ -146,7 +147,7 @@ loop:
 					HttpProxy:    t.HttpProxy,
 					TargetType:   t.TargetType,
 					MultiAccount: t.MultiAccount,
-					Id:           int(file.GetDb().JsonDb.GetTaskId()),
+					Id:           file.NewObjectID(),
 					Status:       true,
 					Flow:         new(file.Flow),
 					NoStore:      true,
@@ -179,12 +180,13 @@ loop:
 					if clientValue, ok := s.Client.LoadOrStore(client.Id, cli); ok {
 						cli, ok = clientValue.(*Client)
 						if !ok {
-							logs.Error("Fail to load client %d", client.Id)
+							logs.Error("Fail to load client %s", client.Id)
 							fail = true
 							_ = c.WriteAddFail()
 							break loop
 						}
 					}
+					s.fireClientConnect(client.Id)
 					key := crypt.GenerateUUID(client.VerifyKey, tl.Mode, tl.ServerIp, strconv.Itoa(tl.Port), tl.LocalPath, tl.StripPre, strconv.FormatBool(tl.ReadOnly), tl.MultiAccount.Content)
 					err = cli.AddFile(key.String(), uuid)
 					if err != nil {

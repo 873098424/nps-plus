@@ -10,6 +10,7 @@ import (
 	"github.com/djylb/nps/lib/common"
 	"github.com/djylb/nps/lib/crypt"
 	"github.com/djylb/nps/lib/index"
+	"github.com/djylb/nps/lib/logs"
 	"github.com/djylb/nps/lib/rate"
 )
 
@@ -23,38 +24,45 @@ var (
 	HostIndex         = index.NewDomainIndex()
 	Blake2bVkeyIndex  = index.NewStringIDIndex()
 	TaskPasswordIndex = index.NewStringIDIndex()
+
+	errClientNotFound = errors.New("can not find client")
 )
 
-// GetDb init data from file
+// GetDb init data from mongodb（唯一持久层；未配置 mongodb_uri 直接报错退出）
 func GetDb() *DbUtils {
 	once.Do(func() {
 		jsonDb := NewJsonDb(common.GetRunPath())
-		jsonDb.LoadClientFromJsonFile()
-		jsonDb.LoadTaskFromJsonFile()
-		jsonDb.LoadHostFromJsonFile()
-		jsonDb.LoadGlobalFromJsonFile()
 		Db = &DbUtils{JsonDb: jsonDb}
+		if mongoConf.URI == "" {
+			logs.Error("mongodb_uri is not configured; nps requires MongoDB as the sole storage backend")
+			panic("mongodb_uri is required: nps aborts because local JSON storage has been removed")
+		}
+		if err := initMongo(jsonDb); err != nil {
+			logs.Error("init mongodb failed: %v", err)
+			panic(err)
+		}
+		mongoOn = true
 	})
 	return Db
 }
 
-func GetMapKeys(m *sync.Map, isSort bool, sortKey, order string) (keys []int) {
+func GetMapKeys(m *sync.Map, isSort bool, sortKey, order string) (keys []string) {
 	if (sortKey == "InletFlow" || sortKey == "ExportFlow") && isSort {
 		return sortClientByKey(m, sortKey, order)
 	}
 	m.Range(func(key, value interface{}) bool {
-		keys = append(keys, key.(int))
+		keys = append(keys, key.(string))
 		return true
 	})
-	sort.Ints(keys)
+	sort.Strings(keys)
 	return
 }
 
-func (s *DbUtils) GetClientList(start, length int, search, sort, order string, clientId int) ([]*Client, int) {
+func (s *DbUtils) GetClientList(start, length int, search, sort, order string, clientId string) ([]*Client, int) {
 	list := make([]*Client, 0)
 	var cnt int
 	originLength := length
-	id := common.GetIntNoErrByStr(search)
+	id := search
 	keys := GetMapKeys(&s.JsonDb.Clients, true, sort, order)
 	for _, key := range keys {
 		if value, ok := s.JsonDb.Clients.Load(key); ok {
@@ -62,7 +70,7 @@ func (s *DbUtils) GetClientList(start, length int, search, sort, order string, c
 			if v.NoDisplay {
 				continue
 			}
-			if clientId != 0 && clientId != v.Id {
+			if clientId != "" && clientId != v.Id {
 				continue
 			}
 			if search != "" && v.Id != id && !common.ContainsFold(v.VerifyKey, search) && !common.ContainsFold(v.Remark, search) {
@@ -81,11 +89,11 @@ func (s *DbUtils) GetClientList(start, length int, search, sort, order string, c
 	return list, cnt
 }
 
-func (s *DbUtils) GetIdByVerifyKey(vKey, addr, localAddr string, hashFunc func(string) string) (id int, err error) {
+func (s *DbUtils) GetIdByVerifyKey(vKey, addr, localAddr string, hashFunc func(string) string) (id string, err error) {
 	var exist bool
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
-		if hashFunc(v.VerifyKey) == vKey && v.Status && v.Id > 0 {
+		if hashFunc(v.VerifyKey) == vKey && v.Status && v.Id != "" {
 			v.Addr = common.GetIpByAddr(addr)
 			v.LocalAddr = common.GetIpByAddr(localAddr)
 			id = v.Id
@@ -97,20 +105,19 @@ func (s *DbUtils) GetIdByVerifyKey(vKey, addr, localAddr string, hashFunc func(s
 	if exist {
 		return
 	}
-	return 0, errors.New("not found")
+	return "", errors.New("not found")
 }
 
-func (s *DbUtils) GetClientIdByBlake2bVkey(vkey string) (id int, err error) {
-	var exist bool
-	id, exist = Blake2bVkeyIndex.Get(vkey)
-	if exist {
+func (s *DbUtils) GetClientIdByBlake2bVkey(vkey string) (id string, err error) {
+	id, ok := Blake2bVkeyIndex.Get(vkey)
+	if ok {
 		return
 	}
 	err = errors.New("can not find client")
 	return
 }
 
-func (s *DbUtils) GetClientIdByMd5Vkey(vkey string) (id int, err error) {
+func (s *DbUtils) GetClientIdByMd5Vkey(vkey string) (id string, err error) {
 	var exist bool
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
@@ -224,12 +231,15 @@ func (s *DbUtils) SaveGlobal(t *Glob) error {
 	return nil
 }
 
-func (s *DbUtils) DelTask(id int) error {
+func (s *DbUtils) DelTask(id string) error {
 	if v, ok := s.JsonDb.Tasks.Load(id); ok {
 		t := v.(*Tunnel)
 		TaskPasswordIndex.Remove(crypt.Md5(t.Password))
 	}
 	s.JsonDb.Tasks.Delete(id)
+	if mongoOn && mongoBackend != nil {
+		mongoBackend.Delete(mongoTypeTask, id)
+	}
 	s.JsonDb.StoreTasksToJsonFile()
 	return nil
 }
@@ -257,7 +267,7 @@ func (s *DbUtils) GetTaskByMd5PasswordOld(p string) (t *Tunnel) {
 	return
 }
 
-func (s *DbUtils) GetTask(id int) (t *Tunnel, err error) {
+func (s *DbUtils) GetTask(id string) (t *Tunnel, err error) {
 	if v, ok := s.JsonDb.Tasks.Load(id); ok {
 		t = v.(*Tunnel)
 		return
@@ -266,12 +276,15 @@ func (s *DbUtils) GetTask(id int) (t *Tunnel, err error) {
 	return
 }
 
-func (s *DbUtils) DelHost(id int) error {
+func (s *DbUtils) DelHost(id string) error {
 	if v, ok := s.JsonDb.Hosts.Load(id); ok {
 		h := v.(*Host)
 		HostIndex.Remove(h.Host, id)
 	}
 	s.JsonDb.Hosts.Delete(id)
+	if mongoOn && mongoBackend != nil {
+		mongoBackend.Delete(mongoTypeHost, id)
+	}
 	s.JsonDb.StoreHostToJsonFile()
 	return nil
 }
@@ -337,19 +350,18 @@ func (s *DbUtils) NewHost(t *Host) error {
 	return nil
 }
 
-func (s *DbUtils) GetHost(start, length int, id int, search string) ([]*Host, int) {
+func (s *DbUtils) GetHost(start, length int, id string, search string) ([]*Host, int) {
 	list := make([]*Host, 0)
 	var cnt int
 	originLength := length
-	searchId := common.GetIntNoErrByStr(search)
 	keys := GetMapKeys(&s.JsonDb.Hosts, false, "", "")
 	for _, key := range keys {
 		if value, ok := s.JsonDb.Hosts.Load(key); ok {
 			v := value.(*Host)
-			if search != "" && v.Id != searchId && !common.ContainsFold(v.Host, search) && !common.ContainsFold(v.Remark, search) && !common.ContainsFold(v.Client.VerifyKey, search) {
+			if search != "" && v.Id != search && !common.ContainsFold(v.Host, search) && !common.ContainsFold(v.Remark, search) && !common.ContainsFold(v.Client.VerifyKey, search) {
 				continue
 			}
-			if id == 0 || v.Client.Id == id {
+			if id == "" || v.Client.Id == id {
 				cnt++
 				if start--; start < 0 {
 					if originLength == 0 {
@@ -364,7 +376,7 @@ func (s *DbUtils) GetHost(start, length int, id int, search string) ([]*Host, in
 	return list, cnt
 }
 
-func (s *DbUtils) DelClient(id int) error {
+func (s *DbUtils) DelClient(id string) error {
 	if v, ok := s.JsonDb.Clients.Load(id); ok {
 		c := v.(*Client)
 		Blake2bVkeyIndex.Remove(crypt.Blake2b(c.VerifyKey))
@@ -373,6 +385,9 @@ func (s *DbUtils) DelClient(id int) error {
 		}
 	}
 	s.JsonDb.Clients.Delete(id)
+	if mongoOn && mongoBackend != nil {
+		mongoBackend.Delete(mongoTypeClient, id)
+	}
 	s.JsonDb.StoreClientsToJsonFile()
 	return nil
 }
@@ -400,8 +415,8 @@ reset:
 		c.Rate = rate.NewRate(int64(c.RateLimit) * 1024)
 	}
 	c.Rate.Start()
-	if c.Id == 0 {
-		c.Id = int(s.JsonDb.GetClientId())
+	if c.Id == "" {
+		c.Id = NewObjectID()
 	}
 	if c.Flow == nil {
 		c.Flow = new(Flow)
@@ -412,7 +427,7 @@ reset:
 	return nil
 }
 
-func (s *DbUtils) VerifyVkey(vkey string, id int) (res bool) {
+func (s *DbUtils) VerifyVkey(vkey string, id string) (res bool) {
 	res = true
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
@@ -425,7 +440,7 @@ func (s *DbUtils) VerifyVkey(vkey string, id int) (res bool) {
 	return res
 }
 
-func (s *DbUtils) VerifyUserName(username string, id int) (res bool) {
+func (s *DbUtils) VerifyUserName(username string, id string) (res bool) {
 	res = true
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
@@ -465,10 +480,13 @@ func (s *DbUtils) UpdateClient(t *Client) error {
 		t.Rate = rate.NewRate(limit)
 		t.Rate.Start()
 	}
+	if mongoOn && mongoBackend != nil {
+		mongoBackend.SaveAllClients()
+	}
 	return nil
 }
 
-func (s *DbUtils) IsPubClient(id int) bool {
+func (s *DbUtils) IsPubClient(id string) bool {
 	client, err := s.GetClient(id)
 	if err == nil {
 		return client.NoDisplay
@@ -476,7 +494,7 @@ func (s *DbUtils) IsPubClient(id int) bool {
 	return false
 }
 
-func (s *DbUtils) GetClient(id int) (c *Client, err error) {
+func (s *DbUtils) GetClient(id string) (c *Client, err error) {
 	if v, ok := s.JsonDb.Clients.Load(id); ok {
 		c = v.(*Client)
 		return
@@ -489,7 +507,7 @@ func (s *DbUtils) GetGlobal() (c *Glob) {
 	return s.JsonDb.Global
 }
 
-func (s *DbUtils) GetHostById(id int) (h *Host, err error) {
+func (s *DbUtils) GetHostById(id string) (h *Host, err error) {
 	if v, ok := s.JsonDb.Hosts.Load(id); ok {
 		h = v.(*Host)
 		return

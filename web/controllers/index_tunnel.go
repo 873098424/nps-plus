@@ -14,7 +14,7 @@ import (
 func (s *IndexController) GetTunnel() {
 	start, length := s.GetAjaxParams()
 	taskType := s.getEscapeString("type")
-	clientId := s.GetIntNoErr("client_id")
+	clientId := s.getEscapeString("client_id")
 	list, cnt := server.GetTunnel(start, length, taskType, clientId, s.getEscapeString("search"), s.getEscapeString("sort"), s.getEscapeString("order"))
 	s.AjaxTable(list, cnt, cnt, nil)
 }
@@ -28,10 +28,16 @@ func (s *IndexController) Add() {
 		return
 	}
 
-	id := int(file.GetDb().JsonDb.GetTaskId())
-	clientId := s.GetIntNoErr("client_id")
+	id := file.NewObjectID()
+	clientId := s.getEscapeString("client_id")
 	isAdmin := s.GetSession("isAdmin").(bool)
 	allowLocal := beego.AppConfig.DefaultBool("allow_user_local", beego.AppConfig.DefaultBool("allow_local_proxy", false)) || isAdmin
+
+	client, err := file.GetDb().GetClient(clientId)
+	if err != nil {
+		s.AjaxErr(err.Error())
+		return
+	}
 
 	targetStr := strings.ToLower(strings.TrimSpace(strings.ReplaceAll(s.getEscapeString("target"), "\r\n", "\n")))
 	if !isAdmin && strings.Contains(targetStr, "bridge://") {
@@ -52,13 +58,14 @@ func (s *IndexController) Add() {
 		Target: &file.Target{
 			TargetStr:     targetStr,
 			ProxyProtocol: s.GetIntNoErr("proxy_protocol"),
-			LocalProxy:    (clientId > 0 && s.GetBoolNoErr("local_proxy") && allowLocal) || clientId <= 0,
+			LocalProxy:    s.GetBoolNoErr("local_proxy") && allowLocal,
 		},
 		UserAuth: &file.MultiAccount{
 			Content:    s.getEscapeString("auth"),
 			AccountMap: common.DealMultiUser(s.getEscapeString("auth")),
 		},
 		Id:           id,
+		Client:       client,
 		Status:       true,
 		Remark:       s.getEscapeString("remark"),
 		Password:     s.getEscapeString("password"),
@@ -82,10 +89,6 @@ func (s *IndexController) Add() {
 		return
 	}
 
-	var err error
-	if t.Client, err = file.GetDb().GetClient(clientId); err != nil {
-		s.AjaxErr(err.Error())
-	}
 	if t.Client.MaxTunnelNum != 0 && t.Client.GetTunnelNum() >= t.Client.MaxTunnelNum {
 		s.AjaxErr("The number of tunnels exceeds the limit")
 		return
@@ -104,7 +107,7 @@ func (s *IndexController) Add() {
 }
 
 func (s *IndexController) GetOneTunnel() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	data := make(map[string]interface{})
 	if t, err := file.GetDb().GetTask(id); err != nil {
 		data["code"] = 0
@@ -117,7 +120,7 @@ func (s *IndexController) GetOneTunnel() {
 }
 
 func (s *IndexController) Edit() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	if s.Ctx.Request.Method == "GET" {
 		if t, err := file.GetDb().GetTask(id); err != nil {
 			s.error()
@@ -141,7 +144,7 @@ func (s *IndexController) Edit() {
 		return
 	}
 
-	clientId := s.GetIntNoErr("client_id")
+	clientId := s.getEscapeString("client_id")
 	if client, err := file.GetDb().GetClient(clientId); err != nil {
 		s.AjaxErr("modified error,the client is not exist")
 		return
@@ -199,7 +202,7 @@ func (s *IndexController) Edit() {
 		t.Flow.InletFlow = 0
 	}
 	t.Target.ProxyProtocol = s.GetIntNoErr("proxy_protocol")
-	t.Target.LocalProxy = (clientId > 0 && s.GetBoolNoErr("local_proxy") && allowLocal) || clientId <= 0
+	t.Target.LocalProxy = s.GetBoolNoErr("local_proxy") && allowLocal
 	_ = file.GetDb().UpdateTask(t)
 	_ = server.StopServer(t.Id)
 	_ = server.StartTask(t.Id)
@@ -208,7 +211,7 @@ func (s *IndexController) Edit() {
 }
 
 func (s *IndexController) Stop() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	mode := s.getEscapeString("mode")
 	if mode != "" {
 		if err := changeStatus(id, mode, "stop"); err != nil {
@@ -223,7 +226,7 @@ func (s *IndexController) Stop() {
 }
 
 func (s *IndexController) Del() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	if err := server.DelTask(id); err != nil {
 		s.AjaxErr("delete error")
 	}
@@ -231,7 +234,7 @@ func (s *IndexController) Del() {
 }
 
 func (s *IndexController) Start() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	mode := s.getEscapeString("mode")
 	if mode != "" {
 		if err := changeStatus(id, mode, "start"); err != nil {
@@ -249,7 +252,7 @@ func (s *IndexController) Start() {
 }
 
 func (s *IndexController) Clear() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	mode := s.getEscapeString("mode")
 	if mode != "" {
 		if err := changeStatus(id, mode, "clear"); err != nil {
@@ -260,7 +263,7 @@ func (s *IndexController) Clear() {
 	s.AjaxErr("modified fail")
 }
 
-func changeStatus(id int, name, action string) error {
+func changeStatus(id string, name, action string) error {
 	t, err := file.GetDb().GetTask(id)
 	if err != nil {
 		return err

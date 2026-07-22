@@ -4,7 +4,7 @@ import "sync"
 
 type StringIDIndex struct {
 	mu   sync.RWMutex
-	data map[string]int
+	data map[string]string
 }
 
 func NewStringIDIndex(initialCapacity ...int) *StringIDIndex {
@@ -14,20 +14,20 @@ func NewStringIDIndex(initialCapacity ...int) *StringIDIndex {
 	}
 	idx := &StringIDIndex{}
 	if cap0 > 0 {
-		idx.data = make(map[string]int, cap0)
+		idx.data = make(map[string]string, cap0)
 	} else {
-		idx.data = make(map[string]int)
+		idx.data = make(map[string]string)
 	}
 	return idx
 }
 
-func (idx *StringIDIndex) Add(key string, id int) {
+func (idx *StringIDIndex) Add(key string, id string) {
 	idx.mu.Lock()
 	idx.data[key] = id
 	idx.mu.Unlock()
 }
 
-func (idx *StringIDIndex) Get(key string) (id int, ok bool) {
+func (idx *StringIDIndex) Get(key string) (id string, ok bool) {
 	idx.mu.RLock()
 	id, ok = idx.data[key]
 	idx.mu.RUnlock()
@@ -42,7 +42,7 @@ func (idx *StringIDIndex) Remove(key string) {
 
 func (idx *StringIDIndex) Clear() {
 	idx.mu.Lock()
-	idx.data = make(map[string]int)
+	idx.data = make(map[string]string)
 	idx.mu.Unlock()
 }
 

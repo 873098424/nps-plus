@@ -286,6 +286,14 @@ func (p *nps) run() error {
 }
 
 func run() {
+	// 共享存储：MongoDB（配置 mongodb_uri 即启用，多节点共享 client/host/task）
+	// 必须在首次 GetDb() 之前注入，故放在最前
+	file.SetMongoConfig(
+		beego.AppConfig.String("mongodb_uri"),
+		beego.AppConfig.DefaultString("mongodb_database", "nps"),
+		beego.AppConfig.DefaultBool("mongodb_watch", false),
+		beego.AppConfig.DefaultInt("mongodb_poll_interval", 5),
+	)
 	routers.Init()
 	task := &file.Tunnel{
 		Mode: "webServer",

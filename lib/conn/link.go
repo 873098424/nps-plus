@@ -28,6 +28,7 @@ type Link struct {
 	LocalProxy bool
 	RemoteAddr string
 	Option     Options
+	Relay      bool // true when forwarded via cross-node relay (skips ipVerify)
 }
 
 type Option func(*Options)

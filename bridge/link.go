@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,13 +20,14 @@ import (
 
 const clientConnectGraceWindow = 3 * time.Second
 
-func (s *Bridge) SendLinkInfo(clientId int, link *conn.Link, t *file.Tunnel) (target net.Conn, err error) {
+func (s *Bridge) SendLinkInfo(clientId string, link *conn.Link, t *file.Tunnel) (target net.Conn, err error) {
 	if link == nil {
 		return nil, errors.New("link is nil")
 	}
 
-	// If IP is restricted, do IP verification
-	if s.ipVerify {
+	// If IP is restricted, do IP verification (skip for relayed links, which
+	// are already authenticated by the peer shared key).
+	if s.ipVerify && !link.Relay {
 		ip := common.GetIpByAddr(link.RemoteAddr)
 		ipValue, ok := s.Register.Load(ip)
 		if !ok {
@@ -41,12 +41,21 @@ func (s *Bridge) SendLinkInfo(clientId int, link *conn.Link, t *file.Tunnel) (ta
 
 	clientValue, ok := s.Client.Load(clientId)
 	if !ok {
-		err = fmt.Errorf("the client %d is not connect", clientId)
+		// Not connected locally: try cross-node relay (if configured). This
+		// also bypasses ipVerify, since relayed traffic carries the real user
+		// address and should not be subject to the local register list.
+		if s.relay != nil {
+			if target, err = s.relay(clientId, link, t); err == nil {
+				return target, nil
+			}
+		}
+		err = fmt.Errorf("the client %s is not connect", clientId)
 		return
 	}
+	client, _ := clientValue.(*Client)
 
 	// if the proxy type is local
-	if link.LocalProxy || clientId < 0 {
+	if link.LocalProxy {
 		if link.ConnType == "udp5" {
 			serverSide, handlerSide := net.Pipe()
 			go conn.HandleUdp5(context.Background(), handlerSide, link.Option.Timeout, "")
@@ -64,12 +73,9 @@ func (s *Bridge) SendLinkInfo(clientId int, link *conn.Link, t *file.Tunnel) (ta
 			}
 			switch scheme {
 			case "tunnel":
-				id, convErr := strconv.Atoi(targetStr)
-				if convErr != nil {
-					return nil, fmt.Errorf("invalid tunnel id %q: %w", targetStr, convErr)
-				}
+				id := targetStr
 				if t != nil && t.Id == id {
-					return nil, fmt.Errorf("task %d cannot connect to itself (tunnel://%d)", t.Id, id)
+					return nil, fmt.Errorf("task %s cannot connect to itself (tunnel://%s)", t.Id, id)
 				}
 				return tool.GetTunnelConn(id, link.RemoteAddr)
 			case "bridge":
@@ -100,7 +106,19 @@ func (s *Bridge) SendLinkInfo(clientId int, link *conn.Link, t *file.Tunnel) (ta
 		return
 	}
 
-	client := clientValue.(*Client)
+	// If IP is restricted, do IP verification (local clients only, skip relay).
+	if s.ipVerify && !link.Relay {
+		ip := common.GetIpByAddr(link.RemoteAddr)
+		ipValue, ok := s.Register.Load(ip)
+		if !ok {
+			return nil, fmt.Errorf("the ip %s is not in the validation list", ip)
+		}
+		if !ipValue.(time.Time).After(time.Now()) {
+			return nil, fmt.Errorf("the validity of the ip %s has expired", ip)
+		}
+	}
+
+	client = clientValue.(*Client)
 
 	var tunnel any
 	var node *Node

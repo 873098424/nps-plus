@@ -72,7 +72,7 @@ func (s *UdpModeServer) Start() error {
 		key := addr.String()
 		v, loaded := s.entries.Load(key)
 		if !loaded {
-			logs.Trace("New udp packet from client %d: %v", s.Task.Client.Id, addr)
+			logs.Trace("New udp packet from client %s: %v", s.Task.Client.Id, addr)
 			ctx, cancel := context.WithCancel(context.Background())
 			ent := &entry{
 				ch:     make(chan packet, 1024),
@@ -117,18 +117,18 @@ func (s *UdpModeServer) clientWorker(addr *net.UDPAddr, ent *entry) {
 
 	if s.Bridge.IsServer() {
 		if err := s.CheckFlowAndConnNum(s.Task.Client); err != nil {
-			logs.Warn("client Id %d, task Id %d flow/conn limit: %v", s.Task.Client.Id, s.Task.Id, err)
+			logs.Warn("client Id %s, task Id %s flow/conn limit: %v", s.Task.Client.Id, s.Task.Id, err)
 			return
 		}
 		if err := conn.CheckFlowLimits(s.Task.Flow, "Task", time.Now()); err != nil {
-			logs.Warn("client Id %d, task Id %d flow/conn limit: %v", s.Task.Client.Id, s.Task.Id, err)
+			logs.Warn("client Id %s, task Id %s flow/conn limit: %v", s.Task.Client.Id, s.Task.Id, err)
 			return
 		}
 		defer s.Task.Client.CutConn()
 		s.Task.AddConn()
 		defer s.Task.CutConn()
 	}
-	isLocal := s.AllowLocalProxy && s.Task.Target.LocalProxy || s.Task.Client.Id < 0
+	isLocal := s.AllowLocalProxy && s.Task.Target.LocalProxy
 	link := conn.NewLink(common.CONN_UDP, s.Task.Target.TargetStr, s.Task.Client.Cnf.Crypt, s.Task.Client.Cnf.Compress, key, isLocal)
 	clientConn, err := s.Bridge.SendLinkInfo(s.Task.Client.Id, link, s.Task)
 	if err != nil {

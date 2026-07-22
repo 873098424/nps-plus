@@ -29,7 +29,7 @@ type HttpProxy struct {
 	HttpPort              int
 	HttpsPort             int
 	Http3Port             int
-	HttpProxyCache        *index.AnyIntIndex
+	HttpProxyCache        *index.AnyStringIndex
 	HttpOnlyPass          string
 	AddOrigin             bool
 	HttpPortStr           string
@@ -46,7 +46,7 @@ type HttpProxy struct {
 	cacheTransport        *CachingTransport // lazy-init, shared across all hosts
 }
 
-func NewHttpProxy(bridge proxy.NetBridge, task *file.Tunnel, httpPort, httpsPort, http3Port int, httpOnlyPass string, addOrigin, allowLocalProxy bool, httpProxyCache *index.AnyIntIndex, useCache bool, cacheLen int) *HttpProxy {
+func NewHttpProxy(bridge proxy.NetBridge, task *file.Tunnel, httpPort, httpsPort, http3Port int, httpOnlyPass string, addOrigin, allowLocalProxy bool, httpProxyCache *index.AnyStringIndex, useCache bool, cacheLen int) *HttpProxy {
 	httpProxy := &HttpProxy{
 		BaseServer:            proxy.NewBaseServer(bridge, task, allowLocalProxy),
 		HttpPort:              httpPort,

@@ -166,28 +166,21 @@ func GetUUID() uuid.UUID {
 	return u
 }
 
-// GetRandomString 生成指定长度的随机密钥，支持可选传入id
-func GetRandomString(l int, id ...int) string {
+// GetRandomString 生成指定长度的随机密钥，支持可选传入id（字符串）
+func GetRandomString(l int, id ...string) string {
 	// 字符集
 	str := "0123456789abcdefghijklmnopqrstuvwxyz"
 	dictBytes := []byte(str)
 	var result []byte
 
-	// 如果传入id，则将id转换为字符集映射并倒序放在最前面
-	if len(id) > 0 {
-		// 将id转为字符集表示的字符串
-		idMapped := ""
-		for id[0] > 0 {
-			idMapped = string(str[id[0]%len(str)]) + idMapped
-			id[0] /= len(str)
+	// 如果传入id，则将其前若干个字符作为前缀放在最前面
+	if len(id) > 0 && id[0] != "" {
+		idMapped := id[0]
+		const maxPrefix = 4
+		if len(idMapped) > maxPrefix {
+			idMapped = idMapped[:maxPrefix]
 		}
-
-		// 如果倒序后的id长度超过指定长度l，则截断
-		//if len(idMapped) > l {
-		//	idMapped = idMapped[:l]
-		//}
-
-		// 将倒序后的id添加到结果中
+		// 将id前缀添加到结果中
 		result = append(result, []byte(idMapped)...)
 	}
 

@@ -23,17 +23,17 @@ func TestFlowSubDoesNotGoNegative(t *testing.T) {
 
 func TestSortClientByKey(t *testing.T) {
 	clients := &sync.Map{}
-	clients.Store("a", &Client{Id: 1, Flow: &Flow{ExportFlow: 10, InletFlow: 100}})
-	clients.Store("b", &Client{Id: 2, Flow: &Flow{ExportFlow: 30, InletFlow: 50}})
-	clients.Store("c", &Client{Id: 3, Flow: &Flow{ExportFlow: 20, InletFlow: 80}})
+	clients.Store("a", &Client{Id: "1", Flow: &Flow{ExportFlow: 10, InletFlow: 100}})
+	clients.Store("b", &Client{Id: "2", Flow: &Flow{ExportFlow: 30, InletFlow: 50}})
+	clients.Store("c", &Client{Id: "3", Flow: &Flow{ExportFlow: 20, InletFlow: 80}})
 
 	desc := sortClientByKey(clients, "ExportFlow", "desc")
-	if len(desc) != 3 || desc[0] != 1 || desc[1] != 3 || desc[2] != 2 {
+	if len(desc) != 3 || desc[0] != "1" || desc[1] != "3" || desc[2] != "2" {
 		t.Fatalf("unexpected desc sort result: %v", desc)
 	}
 
 	asc := sortClientByKey(clients, "InletFlow", "asc")
-	if len(asc) != 3 || asc[0] != 1 || asc[1] != 3 || asc[2] != 2 {
+	if len(asc) != 3 || asc[0] != "1" || asc[1] != "3" || asc[2] != "2" {
 		t.Fatalf("unexpected asc sort result: %v", asc)
 	}
 }

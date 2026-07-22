@@ -119,8 +119,8 @@
                 + row.MaxTunnelNum
                 {{end}}
                 + '&emsp;<br/><br/>'
-                + '<b langtag="word-createtime"></b>: ' + row.CreateTime + '&emsp;'
-                + '<b langtag="word-lastonlinetime"></b>: ' + row.LastOnlineTime + '&emsp;'
+                + '<b langtag="word-createtime"></b>: ' + (row.CreateTime ? new Date(row.CreateTime * 1000).toLocaleString() : '-') + '&emsp;'
+                + '<b langtag="word-lastonlinetime"></b>: ' + (row.LastOnlineTime ? new Date(row.LastOnlineTime * 1000).toLocaleString() : '-') + '&emsp;'
                 + '<b langtag="word-address"></b>: <span onclick="oCopy(this)">' + row.Addr + '</span>&emsp;'
                 + '<b langtag="word-localaddress"></b>: <span onclick="oCopy(this)">' + row.LocalAddr + '</span>&emsp;<br/><br/>'
             if (row.WebUserName || row.WebPassword) {

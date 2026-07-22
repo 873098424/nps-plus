@@ -24,14 +24,14 @@ func (s *stubDialer) DialVirtual(remote string) (net.Conn, error) {
 
 func (s *stubDialer) ServeVirtual(c net.Conn) {}
 
-func setLookupForTest(t *testing.T, fn func(int) (Dialer, bool)) {
+func setLookupForTest(t *testing.T, fn func(string) (Dialer, bool)) {
 	t.Helper()
 	old := lookup.Load()
 	lookup.Store(fn)
 	t.Cleanup(func() {
 		lookup = atomic.Value{}
 		if old != nil {
-			lookup.Store(old.(func(int) (Dialer, bool)))
+			lookup.Store(old.(func(string) (Dialer, bool)))
 		}
 	})
 }
@@ -39,18 +39,18 @@ func setLookupForTest(t *testing.T, fn func(int) (Dialer, bool)) {
 func TestGetTunnelConnWhenLookupNotSet(t *testing.T) {
 	lookup = atomic.Value{}
 
-	_, err := GetTunnelConn(1, "127.0.0.1:80")
+	_, err := GetTunnelConn("1", "127.0.0.1:80")
 	if err == nil || !strings.Contains(err.Error(), "tunnel lookup not set") {
 		t.Fatalf("GetTunnelConn() err=%v, want tunnel lookup not set", err)
 	}
 }
 
 func TestGetTunnelConnWhenTunnelNotFound(t *testing.T) {
-	setLookupForTest(t, func(id int) (Dialer, bool) {
+	setLookupForTest(t, func(id string) (Dialer, bool) {
 		return nil, false
 	})
 
-	_, err := GetTunnelConn(1, "127.0.0.1:80")
+	_, err := GetTunnelConn("1", "127.0.0.1:80")
 	if err == nil || !strings.Contains(err.Error(), "tunnel not found") {
 		t.Fatalf("GetTunnelConn() err=%v, want tunnel not found", err)
 	}
@@ -58,7 +58,7 @@ func TestGetTunnelConnWhenTunnelNotFound(t *testing.T) {
 
 func TestGetTunnelConnDelegatesToDialer(t *testing.T) {
 	called := false
-	setLookupForTest(t, func(id int) (Dialer, bool) {
+	setLookupForTest(t, func(id string) (Dialer, bool) {
 		return &stubDialer{dialFn: func(remote string) (net.Conn, error) {
 			called = true
 			if remote != "127.0.0.1:8080" {
@@ -70,7 +70,7 @@ func TestGetTunnelConnDelegatesToDialer(t *testing.T) {
 		}}, true
 	})
 
-	c, err := GetTunnelConn(7, "127.0.0.1:8080")
+	c, err := GetTunnelConn("7", "127.0.0.1:8080")
 	if err != nil {
 		t.Fatalf("GetTunnelConn() err=%v, want nil", err)
 	}
@@ -82,7 +82,7 @@ func TestGetTunnelConnDelegatesToDialer(t *testing.T) {
 
 func TestGetTunnelConnPropagatesDialError(t *testing.T) {
 	wantErr := errors.New("dial failed")
-	setLookupForTest(t, func(id int) (Dialer, bool) {
+	setLookupForTest(t, func(id string) (Dialer, bool) {
 		return &stubDialer{dialFn: func(remote string) (net.Conn, error) {
 			return nil, wantErr
 		}}, true

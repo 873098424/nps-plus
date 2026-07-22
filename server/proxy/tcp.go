@@ -88,7 +88,7 @@ func (s *TunnelModeServer) handleConn(c net.Conn) {
 
 	if s.Bridge.IsServer() {
 		if err := s.CheckFlowAndConnNum(s.Task.Client); err != nil {
-			logs.Warn("client Id %d, task Id %d, error %v, when tcp connection", s.Task.Client.Id, s.Task.Id, err)
+			logs.Warn("client Id %s, task Id %s, error %v, when tcp connection", s.Task.Client.Id, s.Task.Id, err)
 			_ = c.Close()
 			return
 		}
@@ -96,7 +96,7 @@ func (s *TunnelModeServer) handleConn(c net.Conn) {
 		s.Task.AddConn()
 		defer s.Task.CutConn()
 	}
-	logs.Trace("new tcp connection,local port %d,client %d,remote address %v", s.Task.Port, s.Task.Client.Id, c.RemoteAddr())
+	logs.Trace("new tcp connection,local port %d,client %s,remote address %v", s.Task.Port, s.Task.Client.Id, c.RemoteAddr())
 
 	_ = s.process(conn.NewConn(c), s)
 }
@@ -109,7 +109,7 @@ func ProcessTunnel(c *conn.Conn, s *TunnelModeServer) error {
 	if err != nil {
 		if s.Task.Mode != "file" && s.Bridge.IsServer() {
 			_ = c.Close()
-			logs.Warn("tcp port %d, client Id %d, task Id %d connect error %v", s.Task.Port, s.Task.Client.Id, s.Task.Id, err)
+			logs.Warn("tcp port %d, client Id %s, task Id %s connect error %v", s.Task.Port, s.Task.Client.Id, s.Task.Id, err)
 			return err
 		}
 		targetAddr = ""
@@ -133,14 +133,14 @@ func ProcessHttp(c *conn.Conn, s *TunnelModeServer) error {
 	}
 	if s.Task != nil && s.Task.Mode == "mixProxy" && s.Task.DestAclMode != file.AclOff {
 		if !s.Task.AllowsDestination(addr) {
-			logs.Warn("mixProxy dest acl deny: client=%d task=%d dest=%s", s.Task.Client.Id, s.Task.Id, common.ExtractHost(addr))
+			logs.Warn("mixProxy dest acl deny: client=%s task=%s dest=%s", s.Task.Client.Id, s.Task.Id, common.ExtractHost(addr))
 			_, _ = c.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"))
 			_ = c.Close()
 			return errors.New("destination denied by dest acl")
 		}
 	}
 	remoteAddr := c.Conn.RemoteAddr().String()
-	logs.Debug("http proxy request, client=%d method=%s, host=%s, url=%s, remote address=%s, target=%s", s.Task.Client.Id, r.Method, r.Host, r.URL.RequestURI(), remoteAddr, addr)
+	logs.Debug("http proxy request, client=%s method=%s, host=%s, url=%s, remote address=%s, target=%s", s.Task.Client.Id, r.Method, r.Host, r.URL.RequestURI(), remoteAddr, addr)
 	if r.Method == http.MethodConnect {
 		_, _ = c.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
 		return s.DealClient(c, s.Task.Client, addr, nil, common.CONN_TCP, nil, []*file.Flow{s.Task.Flow, s.Task.Client.Flow}, 0, s.Task.Target.LocalProxy, s.Task)
@@ -152,11 +152,11 @@ func ProcessHttp(c *conn.Conn, s *TunnelModeServer) error {
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			if s.Task != nil && s.Task.Mode == "mixProxy" && s.Task.DestAclMode != file.AclOff {
 				if !s.Task.AllowsDestination(addr) {
-					logs.Warn("mixProxy dest acl deny: client=%d task=%d dest=%s", s.Task.Client.Id, s.Task.Id, common.ExtractHost(addr))
+					logs.Warn("mixProxy dest acl deny: client=%s task=%s dest=%s", s.Task.Client.Id, s.Task.Id, common.ExtractHost(addr))
 					return nil, errors.New("destination denied by dest acl")
 				}
 			}
-			isLocal := s.AllowLocalProxy && s.Task.Target.LocalProxy || s.Task.Client.Id < 0
+			isLocal := s.AllowLocalProxy && s.Task.Target.LocalProxy
 			link := conn.NewLink("tcp", addr, s.Task.Client.Cnf.Crypt, s.Task.Client.Cnf.Compress, remoteAddr, isLocal)
 			target, err := s.Bridge.SendLinkInfo(s.Task.Client.Id, link, nil)
 			if err != nil {

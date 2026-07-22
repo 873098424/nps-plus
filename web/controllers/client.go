@@ -28,11 +28,11 @@ func (s *ClientController) List() {
 	}
 	start, length := s.GetAjaxParams()
 	clientIdSession := s.GetSession("clientId")
-	var clientId int
+	var clientId string
 	if clientIdSession == nil {
-		clientId = s.GetIntNoErr("clientId")
+		clientId = s.getEscapeString("clientId")
 	} else {
-		clientId = clientIdSession.(int)
+		clientId = clientIdSession.(string)
 	}
 	list, cnt := server.GetClientList(start, length, s.getEscapeString("search"), s.getEscapeString("sort"), s.getEscapeString("order"), clientId)
 	cmd := make(map[string]interface{})
@@ -51,7 +51,7 @@ func (s *ClientController) Add() {
 		s.SetInfo("add client")
 		s.display()
 	} else {
-		id := int(file.GetDb().JsonDb.GetClientId())
+		id := file.NewObjectID()
 		t := &file.Client{
 			VerifyKey: s.getEscapeString("vkey"),
 			Id:        id,
@@ -77,7 +77,7 @@ func (s *ClientController) Add() {
 				TimeLimit:  common.GetTimeNoErrByStr(s.getEscapeString("time_limit")),
 			},
 			BlackIpList: RemoveRepeatedElement(strings.Split(s.getEscapeString("blackiplist"), "\r\n")),
-			CreateTime:  time.Now().Format("2006-01-02 15:04:05"),
+			CreateTime:  time.Now().Unix(),
 		}
 		if err := file.GetDb().NewClient(t); err != nil {
 			s.AjaxErr(err.Error())
@@ -87,7 +87,7 @@ func (s *ClientController) Add() {
 }
 
 func (s *ClientController) PingClient() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	data := make(map[string]interface{})
 	if _, err := file.GetDb().GetClient(id); err != nil {
 		data["code"] = 0
@@ -101,7 +101,7 @@ func (s *ClientController) PingClient() {
 
 func (s *ClientController) GetClient() {
 	if s.Ctx.Request.Method == "POST" {
-		id := s.GetIntNoErr("id")
+		id := s.getEscapeString("id")
 		data := make(map[string]interface{})
 		if c, err := file.GetDb().GetClient(id); err != nil {
 			data["code"] = 0
@@ -115,7 +115,7 @@ func (s *ClientController) GetClient() {
 }
 
 func (s *ClientController) Edit() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	if s.Ctx.Request.Method == "GET" {
 		s.Data["menu"] = "client"
 		if c, err := file.GetDb().GetClient(id); err != nil {
@@ -268,8 +268,8 @@ func clearClientStatus(c *file.Client, name string) {
 	//return
 }
 
-func clearStatus(id int, name string) (err error) {
-	if id == 0 {
+func clearStatus(id string, name string) (err error) {
+	if id == "" {
 		file.GetDb().JsonDb.Clients.Range(func(key, value interface{}) bool {
 			v := value.(*file.Client)
 			clearClientStatus(v, name)
@@ -288,7 +288,7 @@ func clearStatus(id int, name string) (err error) {
 }
 
 func (s *ClientController) Clear() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	if s.GetSession("isAdmin").(bool) {
 		mode := s.getEscapeString("mode")
 		if mode != "" {
@@ -302,7 +302,7 @@ func (s *ClientController) Clear() {
 }
 
 func (s *ClientController) ChangeStatus() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	if client, err := file.GetDb().GetClient(id); err == nil {
 		client.Status = s.GetBoolNoErr("status")
 		if !client.Status {
@@ -314,7 +314,7 @@ func (s *ClientController) ChangeStatus() {
 }
 
 func (s *ClientController) Del() {
-	id := s.GetIntNoErr("id")
+	id := s.getEscapeString("id")
 	if err := file.GetDb().DelClient(id); err != nil {
 		s.AjaxErr("delete error")
 	}

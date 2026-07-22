@@ -245,7 +245,7 @@ func (s *Conn) GetHealthInfo() (info string, status bool, err error) {
 // GetHostInfo get task info
 func (s *Conn) GetHostInfo() (h *file.Host, err error) {
 	err = s.getInfo(&h)
-	h.Id = int(file.GetDb().JsonDb.GetHostId())
+	h.Id = file.NewObjectID()
 	h.Flow = new(file.Flow)
 	h.NoStore = true
 	return
@@ -266,7 +266,7 @@ func (s *Conn) GetConfigInfo() (c *file.Client, err error) {
 // GetTaskInfo get task info
 func (s *Conn) GetTaskInfo() (t *file.Tunnel, err error) {
 	err = s.getInfo(&t)
-	t.Id = int(file.GetDb().JsonDb.GetTaskId())
+	t.Id = file.NewObjectID()
 	t.NoStore = true
 	t.Flow = new(file.Flow)
 	return
