@@ -210,6 +210,51 @@ relay_key=xxxxxxxxxxxx
 
 > `relay_key` 在 NPS1 / NPS2 两侧必须一致，且**与任何客户端 vkey 无关**。
 
+### 5.1 传输层选择（`relay_transport`）
+
+relay 两端之间的承载连接支持两种传输层，**NPS1（入口）与 NPS2（持有 client）两侧的 `relay_transport` 必须一致**，否则拨号/监听不匹配、会话永远建不起来。
+
+```ini
+# tcp（默认，兼容旧部署）：一条 TCP 连接 + 自研 mux 多路复用，行为同阶段 1 MVP。
+# quic（UDP）：一条 QUIC 会话，每条被中继的连接使用一条独立的 QUIC stream，
+#      真正获得 QUIC 的头阻塞消除、0-RTT、连接迁移等收益（不再叠加 mux 层）。
+relay_transport=tcp
+```
+
+| 取值 | 底层承载 | 多路复用 | 防火墙 | 适用 |
+|------|----------|----------|--------|------|
+| `tcp`（默认） | TCP `relay_port` | 单连接上叠加自研 `mux` | 放通 TCP `relay_port` | 旧部署、UDP 被封的环境 |
+| `quic` | UDP `relay_port` | QUIC 原生 stream（每连接一条 stream，互不头阻塞） | 放通 UDP `relay_port` | 跨公网高丢包、需要 0-RTT/连接迁移 |
+
+**实现要点**
+
+- `quic` 模式下，NPS1 的 `Relay()` 通过 `OpenStreamSync` 在持久 QUIC 会话上开一条独立 stream，写入认证头（`relay_key`）与中继头（`clientId`+`Link`）；NPS2 的 listener 接受每条入站 stream 后直接交给 `handleSub`，因此**每一条被中继的连接互不影响，单条 stream 关闭不会连坐整个会话**（用 `conn.NewQuicStreamConn`，非 `AutoClose`）。
+- 协议层与 `tcp` 模式完全一致：`checkAuth` / `handleSub` / `SendLinkInfo` 都不感知底层是 TCP 还是 QUIC，仅承载不同。
+- TLS 仅用于满足 QUIC 握手，复用项目证书并 `InsecureSkipVerify`；**真正的身份凭证仍是 `relay_key`**（TLS 证书不提供 peer 鉴权语义）。
+- 首包竞态（请求早于会话建立）仍由 `waitForSess` / `waitForMux` 兜底等待，避免首访 404。
+
+**示例（quic 模式）**
+
+NPS2（持有 client）：
+
+```ini
+relay_port=8028
+relay_transport=quic
+relay_key=sharedsecret
+relay_allow_ips=10.0.0.2
+```
+
+NPS1（入口）：
+
+```ini
+relay_port=8028          # 端口可复用同一个：TCP 用 TCP 协议、QUIC 用 UDP 协议，互不冲突
+relay_transport=quic
+relay_key=sharedsecret
+relay_routes=12:nps2.example.com:8028
+```
+
+> 切换 `relay_transport` 后**两侧都要重启**；跨机部署需确认防火墙放通对应协议（TCP 或 UDP）的 `relay_port`。
+
 ---
 
 ## 6. 数据流时序（HTTP 为例）
@@ -310,8 +355,8 @@ ip_verify=false
 
 **预期日志**：
 
-- NPS1：`relay: session established to NPS2_IP:8028`
-- NPS2：`relay: server listening on ...:8028`
+- NPS1：`relay: session established to NPS2_IP:8028`（tcp 模式）或 `relay: quic session established to NPS2_IP:8028`（quic 模式）
+- NPS2：`relay: server listening on ...:8028`（tcp 模式）或 `relay: server listening on ...:8028 (quic)`（quic 模式）
 - 用户访问 `http://12.xxx.com` 成功拿到 NPS2 侧 client 的服务内容。
 
 ### 10.2 已知修复（阶段 1 MVP）
@@ -331,6 +376,7 @@ ip_verify=false
 | `the client 12 is not connect` | NPS1 的 `relay_routes` 未命中该 clientId；或 NPS2 上 client 未真正连上 | 检查 `relay_routes` 格式 `clientId:host:port`；确认 NPS2 控制台该 client 在线。 |
 | 空响应 / 超时 | NPS2 日志 `relay: SendLinkInfo for client 12 failed`；或 NPS2 `ip_verify` 仍为 true | 看 NPS2 中继日志；确认两侧 `ip_verify=false`；确认目标内网服务可达。 |
 | 用户访问偶发失败 | NPS1 与 NPS2 间会话未就绪（首包早于会话建立） | 观察 NPS1 是否打印 `session established`；确保 NPS1 在收到请求前已完成会话拨号。 |
+| 会话永远建不起来 / 拨号失败 | 两侧 `relay_transport` 不一致（一端 `tcp` 另一端 `quic`）；或防火墙未放通对应协议（quic 需 UDP） | 核对两侧 `relay_transport` 一致；quic 模式下确认 UDP `relay_port` 已放通。 |
 
 ---
 

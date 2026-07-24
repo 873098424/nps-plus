@@ -3,7 +3,9 @@ package server
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -170,6 +172,12 @@ func dealClientFlow() {
 func initRelay(bridgeDisconnect int) {
 	key := beego.AppConfig.String("relay_key")
 	advertise := strings.TrimSpace(beego.AppConfig.String("relay_advertise"))
+	// relay 传输层：tcp（默认，兼容旧部署）或 quic（UDP，原生 stream 多路复用）。
+	// 注意：entry 与 owner 两端的 relay_transport 必须一致，否则拨号/监听不匹配。
+	transport := strings.ToLower(strings.TrimSpace(beego.AppConfig.DefaultString("relay_transport", "tcp")))
+	if transport != "quic" {
+		transport = "tcp"
+	}
 	// 用“是否已配置 mongodb_uri”判断动态路由意图，而非依赖 GetDb() 之后的 mongoOn 标志，
 	// 避免 initRelay 在 GetDb() 置位 mongoOn 之前执行时把动态路由静默关闭。
 	dynamic := file.MongoConfigured()
@@ -189,7 +197,7 @@ func initRelay(bridgeDisconnect int) {
 			logs.Error("relay: relay_routes set but relay_key is empty; relay client disabled")
 		}
 	} else if len(routes) > 0 || dynamic {
-		router := relay.NewRelayRouter(bridgeDisconnect, key, routes)
+		router := relay.NewRelayRouter(bridgeDisconnect, key, routes, transport)
 		if dynamic {
 			router.SetSelfAddr(advertise)
 			router.SetResolver(file.LookupPresence)
@@ -206,7 +214,16 @@ func initRelay(bridgeDisconnect int) {
 		} else {
 			bind := fmt.Sprintf("%s:%d", beego.AppConfig.String("bridge_ip"), port)
 			allow := relay.ParseAllowIps(beego.AppConfig.String("relay_allow_ips"))
-			rs := relay.NewRelayServer(bind, key, allow, Bridge, bridgeDisconnect)
+			// 防御：relay_advertise 的端口应与本机 relay_port 一致，否则 entry 拨号会
+			// 打到错误端口（UDP 无人监听）导致 QUIC 握手超时 "no recent network activity"。
+			if advertise != "" {
+				if ap, _, err := net.SplitHostPort(advertise); err == nil && ap != "" {
+					if aport, err := strconv.Atoi(ap); err == nil && aport != port {
+						logs.Warn("relay: relay_advertise port %d != relay_port %d; entry nodes will dial the wrong port and the session will time out", aport, port)
+					}
+				}
+			}
+			rs := relay.NewRelayServer(bind, key, allow, Bridge, bridgeDisconnect, transport)
 			if err := rs.Start(); err != nil {
 				logs.Error("relay: server start error: %v", err)
 			} else if dynamic {
