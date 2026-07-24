@@ -41,7 +41,7 @@ func relayTLSConfig() *tls.Config {
 // relayQuicCfg 是节点间 relay 会话的 QUIC 参数。
 var relayQuicCfg = &quic.Config{
 	KeepAlivePeriod:    10 * time.Second,
-	MaxIdleTimeout:     30 * time.Second,
+	MaxIdleTimeout:     20 * time.Second,
 	MaxIncomingStreams: 100000,
 	Allow0RTT:          true,
 }
@@ -160,9 +160,9 @@ func (r *RelayRouter) Close() {
 }
 
 // PeerSession maintains one persistent session to a peer nps.
-// - tcp 模式：一条 TCP 连接 + 一个 mux 多路复用（与旧行为一致）。
-// - quic 模式：一条 QUIC 会话，每条被中继的连接使用一条独立的 QUIC stream，
-//   从而真正发挥 QUIC 的多路复用与头阻塞消除优势（不再叠加 mux 层）。
+//   - tcp 模式：一条 TCP 连接 + 一个 mux 多路复用（与旧行为一致）。
+//   - quic 模式：一条 QUIC 会话，每条被中继的连接使用一条独立的 QUIC stream，
+//     从而真正发挥 QUIC 的多路复用与头阻塞消除优势（不再叠加 mux 层）。
 type PeerSession struct {
 	addr      string
 	key       string
@@ -290,11 +290,20 @@ func (p *PeerSession) waitForSess(timeout time.Duration) *quic.Conn {
 	}
 }
 
+// watchLiveness 已移除：quic-go v0.59.0 的 *quic.Conn 未暴露 Ping，无法主动探活。
+// 改为依赖 relayQuic 中带超时的 OpenStreamSync：半死会话上的首包最多阻塞
+// quicStreamOpenTimeout 即快速失败并触发重连，配合 MaxIdleTimeout 回收空闲死会话。
+
 // peerReadyTimeout is how long Relay waits for a cold-start session to come up
 // before giving up. It matches the dial budget in maintain() so a reachable peer
 // is given enough time to finish TCP+auth+mux handshake, while an unreachable one
 // fails promptly instead of hanging the request forever.
 const peerReadyTimeout = 10 * time.Second
+
+// QUIC 会话参数相关超时：
+//   - quicStreamOpenTimeout：单次 OpenStreamSync 的最长阻塞时间。半死会话上首包
+//     最多卡这么久就快速失败并触发重连，避免无限阻塞（npc 断连/重连期间的关键修复）。
+const quicStreamOpenTimeout = 5 * time.Second
 
 // Relay opens a sub-connection on the peer session, writes the relay header
 // (clientId + Link) and returns the connection to the caller.
@@ -353,8 +362,19 @@ func (p *PeerSession) relayQuic(clientId string, link *conn.Link) (net.Conn, err
 	if s == nil {
 		return nil, errors.New("relay: peer quic session not connected")
 	}
-	stream, err := s.OpenStreamSync(context.Background())
+	// 会话已被判死（context 已取消）：主动关闭触发 maintainQuic 立即重连，
+	// 并返回错误让本次请求快速失败，而不是在死路径上阻塞。
+	if s.Context().Err() != nil {
+		_ = s.CloseWithError(0, "stale session")
+		return nil, errors.New("relay: peer quic session stale, reconnecting")
+	}
+	// 带超时的开流：避免在半死会话上无限阻塞（否则首包会被卡到 30s 的
+	// MaxIdleTimeout 才失败）。失败后主动关闭会话，让看门狗/重连尽快生效。
+	ctx, cancel := context.WithTimeout(context.Background(), quicStreamOpenTimeout)
+	defer cancel()
+	stream, err := s.OpenStreamSync(ctx)
 	if err != nil {
+		_ = s.CloseWithError(0, "open stream failed")
 		return nil, err
 	}
 	qc := conn.NewQuicStreamConn(stream, s)
